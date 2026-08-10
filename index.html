@@ -251,12 +251,11 @@ function initGoogleAuth(){
     scope: 'https://www.googleapis.com/auth/drive.file',
     callback: async (resp)=>{
       if(window.__restoreTimeout){ clearTimeout(window.__restoreTimeout); window.__restoreTimeout = null; }
-      const wasAutoRestoring = isAutoRestoring;
-      isAutoRestoring = false;
+      state.pendingGoogleRestore = null;
       if(resp.error){
         hideFullLoading();
-        if(wasAutoRestoring){ clearSessionCache(); render(); } // phiên cũ hết hạn -> quay lại màn đăng nhập, không báo lỗi
-        else toast('⚠️ Đăng nhập Google thất bại');
+        toast('⚠️ Đăng nhập Google thất bại hoặc đã huỷ');
+        render();
         return;
       }
       accessToken = resp.access_token;
@@ -407,24 +406,25 @@ async function tryRestoreSession(){
 
   if(cached.method==='google'){
     if(GOOGLE_DEMO || !tokenClient){ render(); return; }
-    showFullLoading('Đang khôi phục phiên đăng nhập...', true);
-    isAutoRestoring = true;
-    // Nếu Google không phản hồi trong 6 giây (thường do trình duyệt chặn cookie bên
-    // thứ 3 với app chưa xác minh), tự huỷ và quay lại màn đăng nhập thay vì treo mãi.
-    window.__restoreTimeout = setTimeout(()=>{
-      if(isAutoRestoring){
-        isAutoRestoring = false;
-        clearSessionCache();
-        hideFullLoading();
-        render();
-        toast('⏱️ Không khôi phục được phiên cũ, vui lòng đăng nhập lại');
-      }
-    }, 6000);
-    tokenClient.requestAccessToken({prompt:''}); // thử lấy token ngầm, không hiện popup nếu còn phiên Google hợp lệ
+    // Trình duyệt hiện đại chặn cookie bên thứ 3 nên không thể lấy lại quyền truy cập
+    // Google hoàn toàn im lặng một cách đáng tin cậy. Thay vào đó: hiện sẵn màn "chào
+    // mừng trở lại" — học viên chỉ cần CHẠM 1 CÁI, không cần gõ lại gì.
+    state.pendingGoogleRestore = cached;
+    render();
     return;
   }
 
   render();
+}
+function resumeGoogleSession(){
+  showFullLoading('Đang kết nối lại Google...', true);
+  window.__restoreTimeout = setTimeout(()=>{
+    hideFullLoading();
+    state.pendingGoogleRestore = null;
+    toast('⏱️ Không kết nối được, thử lại');
+    render();
+  }, 15000);
+  tokenClient.requestAccessToken(); // 1 chạm, không cần gõ lại gì — đáng tin cậy hơn kiểu ngầm hoàn toàn
 }
 
 /* =========================================================
@@ -634,6 +634,14 @@ function renderLogin(){
 
     ${DEMO_MODE ? `<div class="demo-banner">⚙️ <b>Chế độ demo</b> — chưa nối Google Sheet thật. Xem file <b>SETUP.md</b> đi kèm để kích hoạt đồng bộ thật cho học viên.</div>` : ''}
     ${(!DEMO_MODE && MHKL_DEMO) ? `<div class="demo-banner">⚙️ Đăng nhập Google đã kết nối thật. Luồng "mã học viên MHKL cấp" vẫn ở chế độ demo — chưa deploy xong Apps Script (xem SETUP.md phần B).</div>` : ''}
+
+    ${state.pendingGoogleRestore ? `
+    <button class="btn btn-primary" onclick="resumeGoogleSession()" style="margin-bottom:10px;">
+      👋 Chào mừng trở lại — Tiếp tục với Google
+    </button>
+    <div class="hint" style="text-align:center;margin-bottom:24px;">Chỉ 1 chạm, không cần đăng nhập lại từ đầu</div>
+    <div class="divider">hoặc dùng cách khác</div>
+    ` : ''}
 
     <button class="btn btn-primary" onclick="loginWithGoogle()">
       <span>🔵</span> Đăng nhập bằng Google
