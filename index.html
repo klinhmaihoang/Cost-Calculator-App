@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
 <title>Tính Cost & Giá Bán — Trương Dáng Hương Academy</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root{
     --cream:#FBF6EC;
@@ -120,21 +121,200 @@
 
   .settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
   .g-select{padding:14px;border:2px solid var(--line);border-radius:12px;font-size:15px;background:var(--card);}
+
+  .full-loading{position:fixed;inset:0;background:rgba(251,246,236,.94);z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;}
+  .spinner{width:38px;height:38px;border:4px solid var(--line);border-top-color:var(--amber);border-radius:50%;animation:spin .8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .full-loading-text{font-size:15px;color:var(--ink-soft);}
+  .demo-banner{background:#FDF3DC;border:1px solid #E7C775;color:#7A5B0A;font-size:12.5px;padding:10px 14px;border-radius:12px;margin:0 0 22px;text-align:left;line-height:1.5;}
 </style>
 </head>
 <body>
 <div id="app"></div>
 <div id="toast" class="toast"></div>
+<div id="fullLoading" class="full-loading" style="display:none;">
+  <div class="spinner"></div>
+  <div id="fullLoadingText" class="full-loading-text">Đang tải...</div>
+</div>
 
 <script>
 /* =========================================================
-   DATA LAYER
-   TODO (tích hợp bước sau):
-   - saveToCloud() sẽ gọi Google Sheets API (đăng nhập Google)
-     hoặc Apps Script Web App (đăng nhập tài khoản MHKL cấp)
-     thay vì chỉ giữ trong bộ nhớ tạm như hiện tại.
-   - loadFromCloud() sẽ tải dữ liệu của đúng học viên đang
-     đăng nhập từ Sheet riêng của họ.
+   CONFIG — dán 2 giá trị này sau khi bạn setup Google Cloud +
+   Apps Script (xem file SETUP.md đi kèm). Khi còn để mặc định,
+   app tự chạy ở CHẾ ĐỘ DEMO (dữ liệu chỉ ở bộ nhớ tạm).
+========================================================= */
+const GOOGLE_CLIENT_ID = 'DÁN_GOOGLE_CLIENT_ID_CỦA_BẠN.apps.googleusercontent.com';
+const APPS_SCRIPT_URL  = 'DÁN_URL_WEB_APP_APPS_SCRIPT_CỦA_BẠN';
+const DEMO_MODE = GOOGLE_CLIENT_ID.startsWith('DÁN_') || APPS_SCRIPT_URL.startsWith('DÁN_');
+
+/* =========================================================
+   CLOUD SYNC LAYER
+   - Học viên đăng nhập Google  -> ghi/đọc trực tiếp Google Sheet
+     nằm trong Drive riêng của họ (Sheets API, scope drive.file).
+   - Học viên dùng mã MHKL cấp  -> gọi Apps Script Web App, Apps
+     Script tự tạo/đọc/ghi Sheet riêng cho học viên đó trong Drive
+     của MHKL, có kiểm tra mật khẩu trước khi trả dữ liệu.
+========================================================= */
+const TABS = {
+  Ingredients: ['id','name','group','buyUnit','packQty','baseUnit','price'],
+  SemiRecipes: ['id','name','yieldQty','yieldUnit'],
+  SemiComponents: ['id','semiId','ingredientId','qty'],
+  Dishes: ['id','name','opPct','fcPct'],
+  DishComponents: ['id','dishId','type','refId','qty'],
+};
+
+let accessToken = null;   // token OAuth của học viên đăng nhập Google
+let tokenClient = null;
+
+function showFullLoading(text){
+  document.getElementById('fullLoadingText').textContent = text;
+  document.getElementById('fullLoading').style.display = 'flex';
+}
+function hideFullLoading(){ document.getElementById('fullLoading').style.display = 'none'; }
+
+/* ---- chuyển đổi state (dạng lồng nhau) <-> tabs (dạng bảng phẳng) ---- */
+function stateToTabs(){
+  return {
+    Ingredients: state.ingredients.map(i=>({id:i.id,name:i.name,group:i.group,buyUnit:i.buyUnit,packQty:i.packQty,baseUnit:i.baseUnit,price:i.price})),
+    SemiRecipes: state.semiRecipes.map(s=>({id:s.id,name:s.name,yieldQty:s.yieldQty,yieldUnit:s.yieldUnit})),
+    SemiComponents: state.semiRecipes.flatMap(s=>s.components.map((c,idx)=>({id:s.id+'_c'+idx, semiId:s.id, ingredientId:c.ingredientId, qty:c.qty}))),
+    Dishes: state.dishes.map(d=>({id:d.id,name:d.name,opPct:d.opPct,fcPct:d.fcPct})),
+    DishComponents: state.dishes.flatMap(d=>d.components.map((c,idx)=>({id:d.id+'_c'+idx, dishId:d.id, type:c.type, refId:c.refId, qty:c.qty}))),
+  };
+}
+function tabsToState(tabs){
+  state.ingredients = (tabs.Ingredients||[]).map(r=>({id:String(r.id), name:r.name, group:r.group, buyUnit:r.buyUnit, packQty:Number(r.packQty), baseUnit:r.baseUnit, price:Number(r.price)}));
+  const semiComps = {};
+  (tabs.SemiComponents||[]).forEach(r=>{ (semiComps[r.semiId] = semiComps[r.semiId]||[]).push({ingredientId:String(r.ingredientId), qty:Number(r.qty)}); });
+  state.semiRecipes = (tabs.SemiRecipes||[]).map(r=>({id:String(r.id), name:r.name, yieldQty:Number(r.yieldQty), yieldUnit:r.yieldUnit, components: semiComps[r.id]||[]}));
+  const dishComps = {};
+  (tabs.DishComponents||[]).forEach(r=>{ (dishComps[r.dishId] = dishComps[r.dishId]||[]).push({type:r.type, refId:String(r.refId), qty:Number(r.qty)}); });
+  state.dishes = (tabs.Dishes||[]).map(r=>({id:String(r.id), name:r.name, opPct:Number(r.opPct), fcPct:Number(r.fcPct), components: dishComps[r.id]||[]}));
+}
+
+/* ---- luồng Google (client-side, Sheets API trực tiếp) ---- */
+function initGoogleAuth(){
+  if(DEMO_MODE || !window.google) return;
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: 'https://www.googleapis.com/auth/drive.file',
+    callback: async (resp)=>{
+      if(resp.error){ toast('⚠️ Đăng nhập Google thất bại'); return; }
+      accessToken = resp.access_token;
+      await afterGoogleLogin();
+    }
+  });
+}
+function loginWithGoogle(){
+  if(DEMO_MODE){ mockLogin('google'); return; }
+  tokenClient.requestAccessToken();
+}
+async function findAppSpreadsheet(){
+  const q = encodeURIComponent("appProperties has { key='app' and value='tdh_cost_app' } and trashed=false");
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`, {headers:{Authorization:'Bearer '+accessToken}});
+  const json = await res.json();
+  return (json.files && json.files[0]) ? json.files[0].id : null;
+}
+async function createAppSpreadsheet(){
+  const body = { properties:{title:'CostApp - Dữ liệu của tôi'}, sheets: Object.keys(TABS).map(name=>({properties:{title:name}})) };
+  const res = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+    method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'}, body:JSON.stringify(body)
+  });
+  const json = await res.json();
+  const sheetId = json.spreadsheetId;
+  await writeAllTabs(sheetId, stateToTabs()); // ghi sẵn data mẫu làm điểm khởi đầu
+  await fetch(`https://www.googleapis.com/drive/v3/files/${sheetId}?fields=id`, {
+    method:'PATCH', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
+    body: JSON.stringify({appProperties:{app:'tdh_cost_app'}})
+  });
+  return sheetId;
+}
+async function writeAllTabs(sheetId, dataByTab){
+  const data = Object.keys(TABS).map(tab=>{
+    const headers = TABS[tab];
+    const rows = (dataByTab[tab]||[]).map(obj=>headers.map(h=> obj[h]===undefined?'':obj[h]));
+    return {range: `${tab}!A1`, values:[headers, ...rows]};
+  });
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`, {
+    method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
+    body: JSON.stringify({valueInputOption:'RAW', data})
+  });
+}
+async function readAllTabs(sheetId){
+  const rangeParams = Object.keys(TABS).map(t=>`ranges=${encodeURIComponent(t+'!A1:Z')}`).join('&');
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchGet?${rangeParams}`, {headers:{Authorization:'Bearer '+accessToken}});
+  const json = await res.json();
+  const out = {};
+  Object.keys(TABS).forEach((tab,i)=>{
+    const values = (json.valueRanges[i] && json.valueRanges[i].values) || [];
+    const headers = values[0] || TABS[tab];
+    out[tab] = values.slice(1).map(r=>{ const o={}; headers.forEach((h,idx)=>o[h]=r[idx]); return o; });
+  });
+  return out;
+}
+async function afterGoogleLogin(){
+  showFullLoading('Đang chuẩn bị dữ liệu...');
+  try{
+    let sheetId = await findAppSpreadsheet();
+    let isNew = false;
+    if(!sheetId){ sheetId = await createAppSpreadsheet(); isNew = true; }
+    state.user = {name:'Học viên (Google)', method:'google', sheetId};
+    if(!isNew){ tabsToState(await readAllTabs(sheetId)); }
+    hideFullLoading();
+    toast(isNew ? '✅ Đã tạo Sheet dữ liệu trong Drive của bạn' : '✅ Đã tải dữ liệu từ Sheet của bạn');
+    go('home');
+  }catch(err){
+    hideFullLoading();
+    toast('⚠️ Lỗi kết nối Google Sheets, thử lại sau');
+    console.error(err);
+  }
+}
+
+/* ---- luồng tài khoản MHKL cấp (qua Apps Script Web App) ---- */
+async function callAppsScript(payload){
+  const res = await fetch(APPS_SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(payload) });
+  return res.json();
+}
+async function loginMhkl(){
+  if(DEMO_MODE){ mockLogin('mhkl'); return; }
+  const username = document.getElementById('mhklUser').value.trim();
+  const password = document.getElementById('mhklPass').value;
+  if(!username || !password){ toast('⚠️ Nhập đủ mã học viên và mật khẩu'); return; }
+  showFullLoading('Đang đăng nhập...');
+  try{
+    const res = await callAppsScript({action:'login', username, password});
+    if(!res.ok){ hideFullLoading(); toast('⚠️ '+(res.error||'Đăng nhập thất bại')); return; }
+    state.user = {name: res.name || username, method:'mhkl', token: res.token};
+    showFullLoading('Đang tải dữ liệu...');
+    const loadRes = await callAppsScript({action:'load', token: res.token});
+    hideFullLoading();
+    if(loadRes.ok) tabsToState(loadRes.data);
+    toast('✅ Đăng nhập thành công');
+    go('home');
+  }catch(err){
+    hideFullLoading();
+    toast('⚠️ Lỗi kết nối máy chủ, thử lại sau');
+    console.error(err);
+  }
+}
+async function syncToCloud(){
+  if(DEMO_MODE || !state.user) return;
+  try{
+    if(state.user.method==='google'){
+      await writeAllTabs(state.user.sheetId, stateToTabs());
+    } else {
+      await callAppsScript({action:'save', token: state.user.token, data: stateToTabs()});
+    }
+    toast('☁️ Đã đồng bộ vào Google Sheet của bạn');
+  }catch(err){
+    toast('⚠️ Đồng bộ thất bại — dữ liệu vẫn được giữ trên máy, thử lại sau');
+    console.error(err);
+  }
+}
+
+/* =========================================================
+   DATA LAYER (dữ liệu mẫu demo — sẽ bị ghi đè bằng dữ liệu thật
+   của học viên ngay sau khi đăng nhập thật, nếu đã config xong)
 ========================================================= */
 
 const GROUPS = ["Nguyên liệu nền", "Topping", "Đá", "Bao bì", "Khác"];
@@ -297,7 +477,9 @@ function renderLogin(){
     <h1>Tính Cost &amp; Giá Bán</h1>
     <p>Công cụ dành riêng cho học viên<br>Trương Dáng Hương Academy</p>
 
-    <button class="btn btn-primary" onclick="mockLogin('google')">
+    ${DEMO_MODE ? `<div class="demo-banner">⚙️ <b>Chế độ demo</b> — chưa nối Google Sheet thật. Xem file <b>SETUP.md</b> đi kèm để kích hoạt đồng bộ thật cho học viên.</div>` : ''}
+
+    <button class="btn btn-primary" onclick="loginWithGoogle()">
       <span>🔵</span> Đăng nhập bằng Google
     </button>
     <div class="hint" style="text-align:center;margin-top:8px;">Dữ liệu sẽ tự lưu vào Google Sheet riêng trong Drive của bạn</div>
@@ -310,7 +492,7 @@ function renderLogin(){
       <label>Mật khẩu</label>
       <input type="password" id="mhklPass" placeholder="••••••••">
       <div class="btn-row" style="margin-top:18px;">
-        <button class="btn btn-outline" onclick="mockLogin('mhkl')">Đăng nhập</button>
+        <button class="btn btn-outline" onclick="loginMhkl()">Đăng nhập</button>
       </div>
     </div>
 
@@ -415,7 +597,8 @@ function saveIngredient(){
     buyUnit: document.getElementById('f_buyUnit').value || '—',
     packQty, baseUnit: document.getElementById('f_baseUnit').value, price
   });
-  toast('✅ Đã lưu nguyên liệu (sẽ đồng bộ Sheet ở bản đầy đủ)');
+  toast('✅ Đã lưu nguyên liệu');
+  syncToCloud();
   go('ingredients');
 }
 
@@ -546,7 +729,8 @@ function semiStep3Next(){
 function saveSemi(){
   const w = state.wizard;
   state.semiRecipes.push({id: nextId(), name:w.name, components:w.components, yieldQty:w.yieldQty, yieldUnit:w.yieldUnit});
-  toast('✅ Đã lưu công thức nền (sẽ đồng bộ Sheet ở bản đầy đủ)');
+  toast('✅ Đã lưu công thức nền');
+  syncToCloud();
   state.wizard = null;
   go('semiList');
 }
@@ -669,7 +853,8 @@ function dishStep3Next(){ state.wizard.step = 4; render(); }
 function saveDish(){
   const w = state.wizard;
   state.dishes.push({id: nextId(), name:w.name, components:w.components, opPct:w.opPct, fcPct:w.fcPct});
-  toast('✅ Đã lưu món (sẽ đồng bộ Sheet ở bản đầy đủ)');
+  toast('✅ Đã lưu món');
+  syncToCloud();
   state.wizard = null;
   go('menu');
 }
@@ -751,6 +936,7 @@ function renderDishDetail(){
 function deleteDish(id){
   state.dishes = state.dishes.filter(d=>d.id!==id);
   toast('🗑️ Đã xoá món');
+  syncToCloud();
   go('menu');
 }
 
@@ -765,6 +951,7 @@ function attachHandlers(){
 }
 
 render();
+window.addEventListener('load', initGoogleAuth);
 </script>
 </body>
 </html>
