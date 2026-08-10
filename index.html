@@ -483,6 +483,8 @@ const state = {
   editIngredientId: null,
   selectMode: { ingredients:false, semi:false, dishes:false },
   selected: { ingredients:new Set(), semi:new Set(), dishes:new Set() },
+  adminKey: null,
+  adminAccounts: [],
 };
 
 /* ---------- calculation helpers ---------- */
@@ -593,6 +595,8 @@ function go(screen, extra){
 function render(){
   const app = document.getElementById('app');
   app.innerHTML = '';
+  if(state.screen==='adminLogin'){ app.innerHTML = renderAdminLogin(); return; }
+  if(state.screen==='adminHome'){ app.innerHTML = renderAdminTopbar() + renderAdminHome(); return; }
   if(state.screen==='login'){ app.innerHTML = renderLogin(); attachLoginHandlers(); return; }
 
   app.innerHTML = renderTopbar() + renderScreenBody();
@@ -1339,11 +1343,105 @@ function attachHandlers(){
   }); }
 }
 
+/* =========================================================
+   ADMIN (chỉ MHKL dùng) — truy cập qua URL riêng, có thêm
+   ?admin ở cuối link app, VD:
+   https://klinhmaihoang.github.io/Cost-Calculator-App/#admin
+   Học viên vào link bình thường sẽ KHÔNG bao giờ thấy màn này.
+   Mọi thao tác đều được backend kiểm tra lại mã quản trị (ADMIN_KEY
+   trong Code.gs) — không chỉ dựa vào việc "giấu" đường dẫn.
+========================================================= */
+function renderAdminTopbar(){
+  return `<div class="topbar"><div class="brand">Cost<span>App</span> · <span style="color:var(--plum,#6A3D9A);">Admin</span></div></div>`;
+}
+function renderAdminLogin(){
+  return `
+  <div class="login-wrap">
+    <h1>🔧 Trang quản trị</h1>
+    <p>Chỉ dành cho MHKL. Nhập mã quản trị (khác mã học viên) để tiếp tục.</p>
+    <label style="text-align:left;">Mã quản trị</label>
+    <input type="password" id="adminKeyInput" placeholder="••••••••">
+    <button class="btn btn-primary" style="margin-top:18px;" onclick="adminLogin()">Vào trang quản trị</button>
+  </div>`;
+}
+async function adminLogin(){
+  if(MHKL_DEMO){ toast('⚠️ Chưa nối Apps Script (xem SETUP.md phần B)'); return; }
+  const key = document.getElementById('adminKeyInput').value;
+  if(!key){ toast('⚠️ Nhập mã quản trị'); return; }
+  showFullLoading('Đang kiểm tra...');
+  try{
+    const res = await callAppsScript({action:'admin_list', adminKey:key});
+    hideFullLoading();
+    if(!res.ok){ toast('⚠️ '+(res.error||'Sai mã quản trị')); return; }
+    state.adminKey = key;
+    state.adminAccounts = res.accounts;
+    go('adminHome');
+  }catch(e){
+    hideFullLoading();
+    toast('⚠️ Lỗi kết nối máy chủ');
+  }
+}
+function renderAdminHome(){
+  const accs = state.adminAccounts || [];
+  const rows = accs.map(a=>`
+    <div class="card">
+      <div class="card-title">${a.username}</div>
+      <div class="card-sub">${a.displayName || '(chưa đặt tên)'} · tạo ${a.createdAt ? new Date(a.createdAt).toLocaleDateString('vi-VN') : '—'}</div>
+    </div>`).join('') || `<div class="empty-state">Chưa có tài khoản học viên nào</div>`;
+  return `
+  <div class="screen">
+    <h1 class="page-title">Tạo tài khoản học viên</h1>
+    <p class="page-sub">Điền thông tin rồi bấm tạo — hệ thống tự tạo 1 Google Sheet dữ liệu riêng cho học viên đó.</p>
+    <div class="card">
+      <label style="margin-top:0;">Mã học viên</label>
+      <input type="text" id="a_username" placeholder="VD: HV2026-015">
+      <label>Mật khẩu tạm</label>
+      <input type="text" id="a_password" placeholder="VD: trada2026">
+      <label>Tên học viên</label>
+      <input type="text" id="a_name" placeholder="Nguyễn Thị A">
+      <button class="btn btn-primary" style="margin-top:16px;" onclick="adminCreateAccount()">+ Tạo tài khoản</button>
+    </div>
+    <label>Đã tạo (${accs.length})</label>
+    ${rows}
+    <button class="btn-ghost" style="margin-top:20px;" onclick="adminLogout()">Thoát khỏi trang quản trị</button>
+  </div>`;
+}
+async function adminCreateAccount(){
+  const username = document.getElementById('a_username').value.trim();
+  const password = document.getElementById('a_password').value;
+  const displayName = document.getElementById('a_name').value.trim();
+  if(!username || !password){ toast('⚠️ Nhập đủ mã học viên và mật khẩu'); return; }
+  showFullLoading('Đang tạo tài khoản...');
+  try{
+    const res = await callAppsScript({action:'admin_create', adminKey: state.adminKey, username, password, displayName});
+    hideFullLoading();
+    if(!res.ok){ toast('⚠️ '+(res.error||'Tạo thất bại')); return; }
+    toast(`✅ Đã tạo tài khoản ${username} — gửi mã + mật khẩu cho học viên`);
+    const listRes = await callAppsScript({action:'admin_list', adminKey: state.adminKey});
+    if(listRes.ok) state.adminAccounts = listRes.accounts;
+    go('adminHome');
+  }catch(e){
+    hideFullLoading();
+    toast('⚠️ Lỗi kết nối máy chủ');
+  }
+}
+function adminLogout(){
+  state.adminKey = null;
+  state.adminAccounts = [];
+  window.location.hash = '';
+  location.reload();
+}
+
+const IS_ADMIN_ROUTE = window.location.hash === '#admin';
+if(IS_ADMIN_ROUTE) state.screen = 'adminLogin';
+
 render();
-window.addEventListener('load', async ()=>{
-  initGoogleAuth();
-  await tryRestoreSession();
-});
+if(!IS_ADMIN_ROUTE){
+  window.addEventListener('load', async ()=>{
+    initGoogleAuth();
+    await tryRestoreSession();
+  });
+}
 </script>
 </body>
 </html>
