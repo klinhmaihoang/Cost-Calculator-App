@@ -288,6 +288,14 @@ async function createAppSpreadsheet(){
   return sheetId;
 }
 async function writeAllTabs(sheetId, dataByTab){
+  // Xoá sạch từng tab trước khi ghi lại — nếu không, các dòng cũ (VD nguyên liệu
+  // vừa bị xoá trong app) sẽ vẫn còn sót lại trên Sheet thật vì batchUpdate chỉ
+  // ghi đè đúng số dòng của dữ liệu mới, không tự dọn phần thừa bên dưới.
+  const clearRanges = Object.keys(TABS).map(t=>`${t}!A1:Z10000`);
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchClear`, {
+    method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
+    body: JSON.stringify({ranges: clearRanges})
+  });
   const data = Object.keys(TABS).map(tab=>{
     const headers = TABS[tab];
     const rows = (dataByTab[tab]||[]).map(obj=>headers.map(h=> obj[h]===undefined?'':obj[h]));
