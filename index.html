@@ -62,7 +62,8 @@
 
   .home-tile{display:flex;align-items:center;gap:14px;padding:18px;background:var(--card);border:1px solid var(--line);border-radius:16px;margin-bottom:12px;cursor:pointer;text-align:left;width:100%;}
   .home-tile:hover{border-color:var(--amber);}
-  .home-tile .icon{font-size:28px;width:46px;text-align:center;}
+  .home-tile .icon{font-size:26px;font-weight:700;width:46px;text-align:center;color:var(--amber-deep);}
+  .home-tile.highlight .icon{color:#2A1D02;}
   .home-tile .txt .t{font-size:17px;font-weight:700;color:var(--ink);}
   .home-tile .txt .s{font-size:13px;color:var(--ink-soft);margin-top:2px;}
   .home-tile.highlight{background:linear-gradient(135deg,#F0A319,#D68A0C);border:none;}
@@ -685,26 +686,26 @@ function renderHome(){
   return `
   <div class="screen">
     <h1 class="page-title">Chào bạn 👋</h1>
-    <p class="page-sub">Bạn muốn làm gì hôm nay?</p>
+    <p class="page-sub">Làm theo đúng thứ tự 4 bước bên dưới để tính giá bán chuẩn:</p>
 
-    <button class="home-tile highlight" onclick="startDishWizard()">
-      <div class="icon">🍹</div>
-      <div class="txt"><div class="t">Tính giá món mới</div><div class="s">Chọn nguyên liệu → xem giá bán đề xuất</div></div>
-    </button>
-
-    <button class="home-tile" onclick="go('menu')">
-      <div class="icon">📊</div>
-      <div class="txt"><div class="t">Menu &amp; giá bán của tôi</div><div class="s">${state.dishes.length} món đã lưu</div></div>
+    <button class="home-tile" onclick="go('ingredients')">
+      <div class="icon">①</div>
+      <div class="txt"><div class="t">Nguyên liệu của tôi</div><div class="s">Bắt đầu từ đây — ${state.ingredients.length} nguyên liệu, giá mua &amp; đơn giá</div></div>
     </button>
 
     <button class="home-tile" onclick="go('semiList')">
-      <div class="icon">🧪</div>
-      <div class="txt"><div class="t">Công thức nền</div><div class="s">Trà nền, cà phê nền... — ${state.semiRecipes.length} công thức</div></div>
+      <div class="icon">②</div>
+      <div class="txt"><div class="t">Công thức nền</div><div class="s">Trà nền, cà phê nền... (nếu có) — ${state.semiRecipes.length} công thức</div></div>
     </button>
 
-    <button class="home-tile" onclick="go('ingredients')">
-      <div class="icon">🧾</div>
-      <div class="txt"><div class="t">Nguyên liệu của tôi</div><div class="s">${state.ingredients.length} nguyên liệu — giá mua &amp; đơn giá</div></div>
+    <button class="home-tile highlight" onclick="startDishWizard()">
+      <div class="icon">③</div>
+      <div class="txt"><div class="t">Tính giá món mới</div><div class="s">Chọn nguyên liệu/công thức nền → xem giá bán đề xuất</div></div>
+    </button>
+
+    <button class="home-tile" onclick="go('menu')">
+      <div class="icon">④</div>
+      <div class="txt"><div class="t">Menu &amp; giá bán của tôi</div><div class="s">${state.dishes.length} món đã lưu</div></div>
     </button>
   </div>`;
 }
@@ -1022,6 +1023,7 @@ function renderSemiWizard(){
 
   return `
   <div class="screen">
+    <button class="btn-ghost" onclick="wizardBack()">← ${w.step===1?'Huỷ, quay lại danh sách':'Quay lại'}</button>
     ${wizardHead(w.step,4,'#6A3D9A')}
     <h1 class="page-title">${w.name || 'Công thức nền mới'}</h1>
     ${body}
@@ -1152,6 +1154,7 @@ function renderDishWizard(){
 
   return `
   <div class="screen">
+    <button class="btn-ghost" onclick="wizardBack()">← ${w.step===1?'Huỷ, quay lại trang chủ':'Quay lại'}</button>
     ${wizardHead(w.step,4,'#F0A319')}
     <h1 class="page-title">${w.name || 'Món mới'}</h1>
     ${body}
@@ -1202,8 +1205,12 @@ function saveDish(){
 }
 
 function wizardBack(){
-  if(state.wizard.step>1){ state.wizard.step--; render(); }
-  else { state.wizard=null; go(state.screen==='dishWizard'?'home':'semiList'); }
+  if(state.wizard.step>1){ state.wizard.step--; render(); return; }
+  const editingId = state.wizard.editingId;
+  const wasDish = state.screen==='dishWizard';
+  state.wizard = null;
+  if(editingId && wasDish) go('dishDetail',{selectedDishId:editingId});
+  else go(wasDish?'home':'semiList');
 }
 function wizardHead(step,total,color){
   const dots = Array.from({length:total}).map((_,i)=>`<div class="step-dot ${i<step?'done':''}"></div>`).join('');
