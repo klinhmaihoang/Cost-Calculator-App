@@ -127,6 +127,11 @@
   @keyframes spin{to{transform:rotate(360deg);}}
   .full-loading-text{font-size:15px;color:var(--ink-soft);}
   .demo-banner{background:#FDF3DC;border:1px solid #E7C775;color:#7A5B0A;font-size:12.5px;padding:10px 14px;border-radius:12px;margin:0 0 22px;text-align:left;line-height:1.5;}
+  .icon-btn{background:var(--cream-deep);border:1px solid var(--line);border-radius:10px;width:38px;height:38px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .icon-btn:active{transform:scale(.94);}
+  .icon-btn-danger{background:var(--warn-bg);}
+  .card-actions{display:flex;flex-direction:column;align-items:flex-end;gap:8px;}
+  .card-actions-row{display:flex;gap:6px;}
 </style>
 </head>
 <body>
@@ -143,9 +148,11 @@
    Apps Script (xem file SETUP.md đi kèm). Khi còn để mặc định,
    app tự chạy ở CHẾ ĐỘ DEMO (dữ liệu chỉ ở bộ nhớ tạm).
 ========================================================= */
-const GOOGLE_CLIENT_ID = 'DÁN_GOOGLE_CLIENT_ID_CỦA_BẠN.apps.googleusercontent.com';
-const APPS_SCRIPT_URL  = 'DÁN_URL_WEB_APP_APPS_SCRIPT_CỦA_BẠN';
-const DEMO_MODE = GOOGLE_CLIENT_ID.startsWith('DÁN_') || APPS_SCRIPT_URL.startsWith('DÁN_');
+const GOOGLE_CLIENT_ID = '759653073655-rpjlc12fufopt3et47k8qkv7u8eq9ql1.apps.googleusercontent.com';
+const APPS_SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbw9r0HHYlPL2HmInl__1nX8ITibm_RQAQ3Vj3ZBdDbRzkfR1D4-ktUHRI2iEMAA_ndU/exec';
+const GOOGLE_DEMO = GOOGLE_CLIENT_ID.startsWith('DÁN_');
+const MHKL_DEMO = APPS_SCRIPT_URL.startsWith('DÁN_');
+const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa nối
 
 /* =========================================================
    CLOUD SYNC LAYER
@@ -194,7 +201,7 @@ function tabsToState(tabs){
 
 /* ---- luồng Google (client-side, Sheets API trực tiếp) ---- */
 function initGoogleAuth(){
-  if(DEMO_MODE || !window.google) return;
+  if(GOOGLE_DEMO || !window.google) return;
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: GOOGLE_CLIENT_ID,
     scope: 'https://www.googleapis.com/auth/drive.file',
@@ -206,7 +213,7 @@ function initGoogleAuth(){
   });
 }
 function loginWithGoogle(){
-  if(DEMO_MODE){ mockLogin('google'); return; }
+  if(GOOGLE_DEMO){ mockLogin('google'); return; }
   tokenClient.requestAccessToken();
 }
 async function findAppSpreadsheet(){
@@ -276,7 +283,7 @@ async function callAppsScript(payload){
   return res.json();
 }
 async function loginMhkl(){
-  if(DEMO_MODE){ mockLogin('mhkl'); return; }
+  if(MHKL_DEMO){ mockLogin('mhkl'); return; }
   const username = document.getElementById('mhklUser').value.trim();
   const password = document.getElementById('mhklPass').value;
   if(!username || !password){ toast('⚠️ Nhập đủ mã học viên và mật khẩu'); return; }
@@ -298,7 +305,9 @@ async function loginMhkl(){
   }
 }
 async function syncToCloud(){
-  if(DEMO_MODE || !state.user) return;
+  if(!state.user) return;
+  if(state.user.method==='google' && GOOGLE_DEMO) return;
+  if(state.user.method==='mhkl' && MHKL_DEMO) return;
   try{
     if(state.user.method==='google'){
       await writeAllTabs(state.user.sheetId, stateToTabs());
@@ -478,6 +487,7 @@ function renderLogin(){
     <p>Công cụ dành riêng cho học viên<br>Trương Dáng Hương Academy</p>
 
     ${DEMO_MODE ? `<div class="demo-banner">⚙️ <b>Chế độ demo</b> — chưa nối Google Sheet thật. Xem file <b>SETUP.md</b> đi kèm để kích hoạt đồng bộ thật cho học viên.</div>` : ''}
+    ${(!DEMO_MODE && MHKL_DEMO) ? `<div class="demo-banner">⚙️ Đăng nhập Google đã kết nối thật. Luồng "mã học viên MHKL cấp" vẫn ở chế độ demo — chưa deploy xong Apps Script (xem SETUP.md phần B).</div>` : ''}
 
     <button class="btn btn-primary" onclick="loginWithGoogle()">
       <span>🔵</span> Đăng nhập bằng Google
@@ -546,44 +556,80 @@ function renderIngredients(){
           <div class="card-title">${ing.name}</div>
           <div class="card-sub">${ing.group} · ${ing.buyUnit} · ${fmtVND(ing.price)}</div>
         </div>
-        <div class="card-value">${ingredientUnitPrice(ing).toLocaleString('vi-VN',{maximumFractionDigits:1})}đ/${ing.baseUnit}</div>
+        <div class="card-actions">
+          <div class="card-value">${ingredientUnitPrice(ing).toLocaleString('vi-VN',{maximumFractionDigits:1})}đ/${ing.baseUnit}</div>
+          <div class="card-actions-row">
+            <button class="icon-btn" onclick="editIngredient('${ing.id}')" title="Sửa">✏️</button>
+            <button class="icon-btn icon-btn-danger" onclick="confirmDeleteIngredient('${ing.id}')" title="Xoá">🗑️</button>
+          </div>
+        </div>
       </div>
     </div>`).join('');
   return `
   <div class="screen">
     <button class="btn-ghost" onclick="go('home')">← Trang chủ</button>
     <h1 class="page-title">Nguyên liệu của tôi</h1>
-    <p class="page-sub">Giá mua thực tế — app tự quy đổi ra đơn giá theo gram / ml / cái.</p>
-    <button class="btn btn-primary" style="margin-bottom:16px;" onclick="go('ingredientForm')">+ Thêm nguyên liệu</button>
+    <p class="page-sub">Giá mua thực tế — app tự quy đổi ra đơn giá theo gram / ml / cái. Chạm ✏️ để sửa, 🗑️ để xoá.</p>
+    <button class="btn btn-primary" style="margin-bottom:16px;" onclick="state.editIngredientId=null;go('ingredientForm')">+ Thêm nguyên liệu</button>
     ${rows}
   </div>`;
 }
 
+function editIngredient(id){ state.editIngredientId = id; go('ingredientForm'); }
+
+function findIngredientUsage(id){
+  const semiNames = state.semiRecipes.filter(s=>s.components.some(c=>c.ingredientId===id)).map(s=>s.name);
+  const dishNames = state.dishes.filter(d=>d.components.some(c=>c.type==='ingredient'&&c.refId===id)).map(d=>d.name);
+  return {semiNames, dishNames};
+}
+function confirmDeleteIngredient(id){
+  const ing = findIngredient(id);
+  const usage = findIngredientUsage(id);
+  const used = [...usage.semiNames.map(n=>'Công thức nền: '+n), ...usage.dishNames.map(n=>'Món: '+n)];
+  let msg = `Xoá nguyên liệu "${ing.name}"?`;
+  if(used.length) msg += `\n\n⚠️ Đang được dùng trong:\n- ${used.join('\n- ')}\n\nXoá sẽ tự gỡ khỏi các công thức/món trên.`;
+  if(confirm(msg)) deleteIngredient(id);
+}
+function deleteIngredient(id){
+  state.semiRecipes.forEach(s=>{ s.components = s.components.filter(c=>c.ingredientId!==id); });
+  state.dishes.forEach(d=>{ d.components = d.components.filter(c=>!(c.type==='ingredient'&&c.refId===id)); });
+  state.ingredients = state.ingredients.filter(i=>i.id!==id);
+  toast('🗑️ Đã xoá nguyên liệu');
+  syncToCloud();
+  go('ingredients');
+}
+
 function renderIngredientForm(){
-  const opts = GROUPS.map(g=>`<option value="${g}">${g}</option>`).join('');
+  const editing = state.editIngredientId ? findIngredient(state.editIngredientId) : null;
+  const opts = GROUPS.map(g=>`<option value="${g}" ${editing&&editing.group===g?'selected':''}>${g}</option>`).join('');
   return `
   <div class="screen">
     <button class="btn-ghost" onclick="go('ingredients')">← Quay lại</button>
-    <h1 class="page-title">Thêm nguyên liệu</h1>
+    <h1 class="page-title">${editing?'Sửa nguyên liệu':'Thêm nguyên liệu'}</h1>
     <label>Tên nguyên liệu</label>
-    <input type="text" id="f_name" placeholder="VD: Trà ô long">
+    <input type="text" id="f_name" value="${editing?editing.name:''}" placeholder="VD: Trà ô long">
     <label>Nhóm</label>
     <select id="f_group">${opts}</select>
     <label>Quy cách mua (VD: Túi 500g)</label>
-    <input type="text" id="f_buyUnit" placeholder="Túi 500g">
+    <input type="text" id="f_buyUnit" value="${editing?editing.buyUnit:''}" placeholder="Túi 500g">
     <div class="settings-grid" style="margin-top:16px;">
       <div>
         <label>Số lượng / quy cách</label>
-        <input type="number" id="f_packQty" placeholder="500">
+        <input type="number" id="f_packQty" value="${editing?editing.packQty:''}" placeholder="500">
       </div>
       <div>
         <label>Đơn vị tính</label>
-        <select id="f_baseUnit"><option value="g">gram (g)</option><option value="ml">ml</option><option value="cái">cái</option></select>
+        <select id="f_baseUnit">
+          <option value="g" ${editing&&editing.baseUnit==='g'?'selected':''}>gram (g)</option>
+          <option value="ml" ${editing&&editing.baseUnit==='ml'?'selected':''}>ml</option>
+          <option value="cái" ${editing&&editing.baseUnit==='cái'?'selected':''}>cái</option>
+        </select>
       </div>
     </div>
     <label>Giá mua (VNĐ)</label>
-    <input type="number" id="f_price" placeholder="90000">
-    <button class="btn btn-primary" style="margin-top:22px;" onclick="saveIngredient()">Lưu nguyên liệu</button>
+    <input type="number" id="f_price" value="${editing?editing.price:''}" placeholder="90000">
+    <button class="btn btn-primary" style="margin-top:22px;" onclick="saveIngredient()">${editing?'Lưu thay đổi':'Lưu nguyên liệu'}</button>
+    ${editing?`<button class="btn btn-danger" style="margin-top:10px;" onclick="confirmDeleteIngredient('${editing.id}')">Xoá nguyên liệu này</button>`:''}
   </div>`;
 }
 function saveIngredient(){
@@ -591,13 +637,20 @@ function saveIngredient(){
   const packQty = parseFloat(document.getElementById('f_packQty').value);
   const price = parseFloat(document.getElementById('f_price').value);
   if(!name || !packQty || !price){ toast('⚠️ Vui lòng nhập đủ thông tin'); return; }
-  state.ingredients.push({
-    id: nextId(), name,
+  const payload = {
+    name,
     group: document.getElementById('f_group').value,
     buyUnit: document.getElementById('f_buyUnit').value || '—',
     packQty, baseUnit: document.getElementById('f_baseUnit').value, price
-  });
-  toast('✅ Đã lưu nguyên liệu');
+  };
+  if(state.editIngredientId){
+    Object.assign(findIngredient(state.editIngredientId), payload);
+    toast('✅ Đã lưu thay đổi');
+  } else {
+    state.ingredients.push({id: nextId(), ...payload});
+    toast('✅ Đã lưu nguyên liệu');
+  }
+  state.editIngredientId = null;
   syncToCloud();
   go('ingredients');
 }
@@ -611,21 +664,50 @@ function renderSemiList(){
           <div class="card-title">${s.name}</div>
           <div class="card-sub">Mẻ ${s.components.length} nguyên liệu → ra ${fmtNum(s.yieldQty)} ${s.yieldUnit}</div>
         </div>
-        <div class="card-value">${semiUnitPrice(s).toLocaleString('vi-VN',{maximumFractionDigits:1})}đ/${s.yieldUnit}</div>
+        <div class="card-actions">
+          <div class="card-value">${semiUnitPrice(s).toLocaleString('vi-VN',{maximumFractionDigits:1})}đ/${s.yieldUnit}</div>
+          <div class="card-actions-row">
+            <button class="icon-btn" onclick="startSemiWizard('${s.id}')" title="Sửa">✏️</button>
+            <button class="icon-btn icon-btn-danger" onclick="confirmDeleteSemi('${s.id}')" title="Xoá">🗑️</button>
+          </div>
+        </div>
       </div>
     </div>`).join('') || `<div class="empty-state"><div class="big">🧪</div>Chưa có công thức nền nào</div>`;
   return `
   <div class="screen">
     <button class="btn-ghost" onclick="go('home')">← Trang chủ</button>
     <h1 class="page-title">Công thức nền</h1>
-    <p class="page-sub">Trà nền, cà phê nền... nấu 1 mẻ rồi dùng dần cho nhiều món.</p>
+    <p class="page-sub">Trà nền, cà phê nền... nấu 1 mẻ rồi dùng dần cho nhiều món. Chạm ✏️ để sửa, 🗑️ để xoá.</p>
     <button class="btn btn-primary" style="margin-bottom:16px;" onclick="startSemiWizard()">+ Thêm công thức nền</button>
     ${rows}
   </div>`;
 }
 
-function startSemiWizard(){
-  state.wizard = {step:1, name:'', components:[], yieldQty:'', yieldUnit:'ml'};
+function findSemiUsage(id){
+  return state.dishes.filter(d=>d.components.some(c=>c.type==='semi'&&c.refId===id)).map(d=>d.name);
+}
+function confirmDeleteSemi(id){
+  const s = findSemi(id);
+  const usedIn = findSemiUsage(id);
+  let msg = `Xoá công thức nền "${s.name}"?`;
+  if(usedIn.length) msg += `\n\n⚠️ Đang được dùng trong món:\n- ${usedIn.join('\n- ')}\n\nXoá sẽ tự gỡ khỏi các món trên.`;
+  if(confirm(msg)) deleteSemi(id);
+}
+function deleteSemi(id){
+  state.dishes.forEach(d=>{ d.components = d.components.filter(c=>!(c.type==='semi'&&c.refId===id)); });
+  state.semiRecipes = state.semiRecipes.filter(s=>s.id!==id);
+  toast('🗑️ Đã xoá công thức nền');
+  syncToCloud();
+  go('semiList');
+}
+
+function startSemiWizard(editId){
+  if(editId){
+    const s = findSemi(editId);
+    state.wizard = {step:1, editingId:s.id, name:s.name, components:s.components.map(c=>({...c})), yieldQty:s.yieldQty, yieldUnit:s.yieldUnit};
+  } else {
+    state.wizard = {step:1, editingId:null, name:'', components:[], yieldQty:'', yieldUnit:'ml'};
+  }
   go('semiWizard');
 }
 function semiWizardIngredientOptions(){
@@ -728,16 +810,26 @@ function semiStep3Next(){
 }
 function saveSemi(){
   const w = state.wizard;
-  state.semiRecipes.push({id: nextId(), name:w.name, components:w.components, yieldQty:w.yieldQty, yieldUnit:w.yieldUnit});
-  toast('✅ Đã lưu công thức nền');
+  if(w.editingId){
+    Object.assign(findSemi(w.editingId), {name:w.name, components:w.components, yieldQty:w.yieldQty, yieldUnit:w.yieldUnit});
+    toast('✅ Đã lưu thay đổi công thức nền');
+  } else {
+    state.semiRecipes.push({id: nextId(), name:w.name, components:w.components, yieldQty:w.yieldQty, yieldUnit:w.yieldUnit});
+    toast('✅ Đã lưu công thức nền');
+  }
   syncToCloud();
   state.wizard = null;
   go('semiList');
 }
 
 /* ---------- DISH WIZARD ---------- */
-function startDishWizard(){
-  state.wizard = {step:1, name:'', components:[], opPct:0.15, fcPct:0.30};
+function startDishWizard(editId){
+  if(editId){
+    const d = state.dishes.find(x=>x.id===editId);
+    state.wizard = {step:1, editingId:d.id, name:d.name, components:d.components.map(c=>({...c})), opPct:d.opPct, fcPct:d.fcPct};
+  } else {
+    state.wizard = {step:1, editingId:null, name:'', components:[], opPct:0.15, fcPct:0.30};
+  }
   go('dishWizard');
 }
 function dishComponentOptions(){
@@ -852,11 +944,19 @@ function dishSettingsPreview(){
 function dishStep3Next(){ state.wizard.step = 4; render(); }
 function saveDish(){
   const w = state.wizard;
-  state.dishes.push({id: nextId(), name:w.name, components:w.components, opPct:w.opPct, fcPct:w.fcPct});
-  toast('✅ Đã lưu món');
+  const wasEditing = w.editingId;
+  if(wasEditing){
+    const d = state.dishes.find(x=>x.id===wasEditing);
+    Object.assign(d, {name:w.name, components:w.components, opPct:w.opPct, fcPct:w.fcPct});
+    toast('✅ Đã lưu thay đổi món');
+  } else {
+    state.dishes.push({id: nextId(), name:w.name, components:w.components, opPct:w.opPct, fcPct:w.fcPct});
+    toast('✅ Đã lưu món');
+  }
   syncToCloud();
   state.wizard = null;
-  go('menu');
+  if(wasEditing) go('dishDetail',{selectedDishId:wasEditing});
+  else go('menu');
 }
 
 function wizardBack(){
@@ -890,7 +990,10 @@ function renderMenu(){
           <div class="card-title">${d.name}</div>
           <div class="card-sub">Cost ${fmtVND(dishCost(d))} · <span class="fc-badge ${fc<=0.32?'fc-good':'fc-warn'}" style="padding:2px 8px;">FC ${(fc*100).toFixed(1)}%</span></div>
         </div>
-        <div class="card-value">${fmtVND(suggestedPrice(d))}</div>
+        <div class="card-actions">
+          <div class="card-value">${fmtVND(suggestedPrice(d))}</div>
+          <button class="icon-btn" onclick="event.stopPropagation();startDishWizard('${d.id}')" title="Sửa">✏️</button>
+        </div>
       </div>
     </div>`;
   }).join('') || `<div class="empty-state"><div class="big">🍹</div>Chưa có món nào — bấm "Tính giá món mới" ở trang chủ.</div>`;
@@ -898,7 +1001,7 @@ function renderMenu(){
   <div class="screen">
     <button class="btn-ghost" onclick="go('home')">← Trang chủ</button>
     <h1 class="page-title">Menu &amp; giá bán</h1>
-    <p class="page-sub">Chạm vào món để xem chi tiết cost.</p>
+    <p class="page-sub">Chạm vào món để xem chi tiết cost, ✏️ để sửa nhanh.</p>
     <button class="btn btn-primary" style="margin-bottom:16px;" onclick="startDishWizard()">+ Tính giá món mới</button>
     ${rows}
   </div>`;
@@ -930,8 +1033,13 @@ function renderDishDetail(){
     <div class="breakdown-bar">${bars}</div>
     <label style="margin-top:22px;">Thành phần</label>
     ${compRows}
-    <button class="btn btn-danger" style="margin-top:18px;" onclick="deleteDish('${d.id}')">Xoá món này</button>
+    <button class="btn btn-outline" style="margin-top:18px;" onclick="startDishWizard('${d.id}')">✏️ Sửa món này</button>
+    <button class="btn btn-danger" style="margin-top:10px;" onclick="confirmDeleteDish('${d.id}')">Xoá món này</button>
   </div>`;
+}
+function confirmDeleteDish(id){
+  const d = state.dishes.find(x=>x.id===id);
+  if(confirm(`Xoá món "${d.name}"?`)) deleteDish(id);
 }
 function deleteDish(id){
   state.dishes = state.dishes.filter(d=>d.id!==id);
