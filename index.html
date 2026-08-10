@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Tính Cost & Giá Bán — Trương Dáng Hương Academy</title>
+<style>
+  :root{
+    --cream:#FBF6EC;
+    --cream-deep:#F3EAD6;
+    --card:#FFFFFF;
+    --line:#ECE0C6;
+    --amber:#F0A319;
+    --amber-deep:#C97F0A;
+    --ink:#33281A;
+    --ink-soft:#6B5E4B;
+    --good:#4C7A3D;
+    --good-bg:#E9F1E4;
+    --warn:#B5482E;
+    --warn-bg:#FBEAE4;
+    --plum:#6A3D9A;
+    --serif: Georgia, 'Times New Roman', serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--cream);color:var(--ink);font-family:var(--sans);}
+  body{min-height:100vh;}
+  #app{max-width:480px;margin:0 auto;min-height:100vh;background:var(--cream);display:flex;flex-direction:column;position:relative;}
+
+  /* ---- top bar ---- */
+  .topbar{padding:18px 20px 14px;background:var(--cream);border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:5;}
+  .topbar .brand{font-family:var(--serif);font-size:18px;font-weight:700;color:var(--ink);}
+  .topbar .brand span{color:var(--amber-deep);}
+  .sync-pill{font-size:11px;color:var(--ink-soft);background:var(--cream-deep);border:1px solid var(--line);border-radius:20px;padding:4px 10px;white-space:nowrap;}
+
+  .screen{padding:20px 20px 90px;flex:1;}
+  h1.page-title{font-family:var(--serif);font-size:26px;margin:4px 0 6px;color:var(--ink);}
+  p.page-sub{font-size:15px;color:var(--ink-soft);margin:0 0 20px;line-height:1.5;}
+
+  /* ---- buttons ---- */
+  .btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:16px 18px;border-radius:14px;border:none;font-size:17px;font-weight:600;font-family:var(--sans);cursor:pointer;transition:transform .08s ease;}
+  .btn:active{transform:scale(0.98);}
+  .btn-primary{background:var(--amber);color:#2A1D02;}
+  .btn-primary:hover{background:var(--amber-deep);}
+  .btn-outline{background:var(--card);color:var(--ink);border:2px solid var(--line);}
+  .btn-outline:hover{border-color:var(--amber);}
+  .btn-ghost{background:transparent;color:var(--ink-soft);font-weight:500;padding:12px;}
+  .btn-danger{background:var(--warn-bg);color:var(--warn);}
+  .btn-sm{padding:10px 14px;font-size:14px;border-radius:10px;width:auto;}
+  .btn-row{display:flex;gap:10px;margin-top:10px;}
+  .btn-row .btn{flex:1;}
+
+  /* ---- cards ---- */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin-bottom:12px;}
+  .card-tap{cursor:pointer;}
+  .card-tap:hover{border-color:var(--amber);}
+  .card-row{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+  .card-title{font-size:17px;font-weight:700;color:var(--ink);}
+  .card-sub{font-size:13.5px;color:var(--ink-soft);margin-top:2px;}
+  .card-value{font-size:17px;font-weight:700;color:var(--amber-deep);white-space:nowrap;}
+
+  .home-tile{display:flex;align-items:center;gap:14px;padding:18px;background:var(--card);border:1px solid var(--line);border-radius:16px;margin-bottom:12px;cursor:pointer;text-align:left;width:100%;}
+  .home-tile:hover{border-color:var(--amber);}
+  .home-tile .icon{font-size:28px;width:46px;text-align:center;}
+  .home-tile .txt .t{font-size:17px;font-weight:700;color:var(--ink);}
+  .home-tile .txt .s{font-size:13px;color:var(--ink-soft);margin-top:2px;}
+  .home-tile.highlight{background:linear-gradient(135deg,#F0A319,#D68A0C);border:none;}
+  .home-tile.highlight .txt .t, .home-tile.highlight .txt .s{color:#2A1D02;}
+  .home-tile.highlight .txt .s{color:#4a3510;}
+
+  /* ---- form ---- */
+  label{display:block;font-size:14px;font-weight:600;color:var(--ink);margin:16px 0 6px;}
+  label:first-child{margin-top:0;}
+  input[type=text], input[type=number], input[type=password], select{
+    width:100%;padding:14px 14px;border:2px solid var(--line);border-radius:12px;font-size:16px;font-family:var(--sans);background:var(--card);color:var(--ink);
+  }
+  input:focus, select:focus{outline:none;border-color:var(--amber);}
+  .hint{font-size:12.5px;color:var(--ink-soft);margin-top:5px;}
+  .unit-badge{display:inline-block;background:var(--cream-deep);border:1px solid var(--line);color:var(--ink-soft);font-size:13px;padding:6px 12px;border-radius:10px;margin-top:6px;}
+
+  /* ---- wizard progress: filling cup ---- */
+  .wizard-head{display:flex;align-items:center;gap:16px;margin-bottom:8px;}
+  .cup{width:40px;height:48px;flex-shrink:0;}
+  .steps-row{display:flex;gap:6px;flex:1;}
+  .step-dot{flex:1;height:6px;border-radius:4px;background:var(--line);}
+  .step-dot.done{background:var(--amber);}
+  .step-label{font-size:13px;color:var(--ink-soft);margin-bottom:18px;}
+
+  /* ---- component list rows ---- */
+  .comp-row{display:flex;align-items:center;justify-content:space-between;background:var(--cream-deep);border-radius:12px;padding:12px 14px;margin-bottom:8px;}
+  .comp-row .info .n{font-weight:700;font-size:15px;}
+  .comp-row .info .m{font-size:13px;color:var(--ink-soft);}
+  .comp-row .remove{background:none;border:none;color:var(--warn);font-size:20px;cursor:pointer;padding:4px 8px;}
+
+  /* ---- breakdown bar ---- */
+  .breakdown-bar{display:flex;height:22px;border-radius:8px;overflow:hidden;margin:14px 0;border:1px solid var(--line);}
+  .legend{display:flex;flex-wrap:wrap;gap:10px 16px;font-size:12.5px;color:var(--ink-soft);margin-bottom:6px;}
+  .legend .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:middle;}
+
+  .price-hero{background:var(--card);border:2px solid var(--amber);border-radius:18px;padding:22px;text-align:center;margin:14px 0 18px;}
+  .price-hero .lbl{font-size:14px;color:var(--ink-soft);}
+  .price-hero .val{font-family:var(--serif);font-size:38px;font-weight:700;color:var(--amber-deep);margin:6px 0;}
+  .fc-badge{display:inline-block;font-size:13px;font-weight:700;padding:5px 12px;border-radius:20px;}
+  .fc-good{background:var(--good-bg);color:var(--good);}
+  .fc-warn{background:var(--warn-bg);color:var(--warn);}
+
+  .empty-state{text-align:center;padding:50px 20px;color:var(--ink-soft);}
+  .empty-state .big{font-size:40px;margin-bottom:10px;}
+
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 20px;border-radius:30px;font-size:14px;box-shadow:0 6px 20px rgba(0,0,0,.25);z-index:50;opacity:0;transition:opacity .25s ease;pointer-events:none;}
+  .toast.show{opacity:1;}
+
+  .login-wrap{padding:60px 24px 40px;text-align:center;}
+  .login-cup{width:70px;height:84px;margin:0 auto 18px;}
+  .login-wrap h1{font-family:var(--serif);font-size:28px;margin:0 0 6px;}
+  .login-wrap p{color:var(--ink-soft);font-size:15px;margin:0 0 34px;line-height:1.5;}
+  .divider{display:flex;align-items:center;gap:12px;margin:22px 0;color:var(--ink-soft);font-size:13px;}
+  .divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--line);}
+  .login-form{text-align:left;}
+
+  .settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .g-select{padding:14px;border:2px solid var(--line);border-radius:12px;font-size:15px;background:var(--card);}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" class="toast"></div>
+
+<script>
+/* =========================================================
+   DATA LAYER
+   TODO (tích hợp bước sau):
+   - saveToCloud() sẽ gọi Google Sheets API (đăng nhập Google)
+     hoặc Apps Script Web App (đăng nhập tài khoản MHKL cấp)
+     thay vì chỉ giữ trong bộ nhớ tạm như hiện tại.
+   - loadFromCloud() sẽ tải dữ liệu của đúng học viên đang
+     đăng nhập từ Sheet riêng của họ.
+========================================================= */
+
+const GROUPS = ["Nguyên liệu nền", "Topping", "Đá", "Bao bì", "Khác"];
+const GROUP_COLORS = {
+  "Nguyên liệu nền": "#F0A319",
+  "Bán thành phẩm": "#6A3D9A",
+  "Topping": "#4C7A3D",
+  "Đá": "#3F8FB0",
+  "Bao bì": "#B5482E",
+  "Khác": "#9A8F7A"
+};
+
+let uid = 100;
+const nextId = () => (++uid).toString();
+
+const state = {
+  screen: 'login',
+  user: null, // {name, method: 'google' | 'mhkl'}
+  ingredients: [
+    {id:'i1', name:'Trà đen (lá rời)', group:'Nguyên liệu nền', buyUnit:'Túi 500g', packQty:500, baseUnit:'g', price:90000},
+    {id:'i2', name:'Sữa tươi không đường', group:'Nguyên liệu nền', buyUnit:'Bịch 1L', packQty:1000, baseUnit:'ml', price:32000},
+    {id:'i3', name:'Sữa đặc', group:'Nguyên liệu nền', buyUnit:'Lon 380g', packQty:380, baseUnit:'g', price:25000},
+    {id:'i4', name:'Đường cát trắng', group:'Nguyên liệu nền', buyUnit:'Bao 1kg', packQty:1000, baseUnit:'g', price:22000},
+    {id:'i5', name:'Trân châu đen', group:'Topping', buyUnit:'Bịch 1kg', packQty:1000, baseUnit:'g', price:45000},
+    {id:'i6', name:'Đá viên', group:'Đá', buyUnit:'Bao 10kg', packQty:10000, baseUnit:'g', price:15000},
+    {id:'i7', name:'Ly nhựa 500ml', group:'Bao bì', buyUnit:'Thùng 50 cái', packQty:50, baseUnit:'cái', price:75000},
+    {id:'i8', name:'Ống hút', group:'Bao bì', buyUnit:'Bịch 100 cái', packQty:100, baseUnit:'cái', price:20000},
+    {id:'i9', name:'Cà phê rang xay', group:'Nguyên liệu nền', buyUnit:'Bao 1kg', packQty:1000, baseUnit:'g', price:220000},
+    {id:'i10', name:'Nước lọc', group:'Nguyên liệu nền', buyUnit:'Bình 20L', packQty:20000, baseUnit:'ml', price:15000},
+  ],
+  semiRecipes: [
+    {id:'s1', name:'Cà phê nền', components:[{ingredientId:'i9',qty:200},{ingredientId:'i10',qty:2000}], yieldQty:1700, yieldUnit:'ml'},
+    {id:'s2', name:'Trà đen nền', components:[{ingredientId:'i1',qty:40},{ingredientId:'i10',qty:2000}], yieldQty:1900, yieldUnit:'ml'},
+  ],
+  dishes: [
+    {id:'d1', name:'Cà phê đen đá', opPct:0.15, fcPct:0.30,
+      components:[{type:'semi',refId:'s1',qty:50},{type:'ingredient',refId:'i6',qty:150},{type:'ingredient',refId:'i7',qty:1},{type:'ingredient',refId:'i8',qty:1}]},
+    {id:'d2', name:'Trà đen sữa tươi', opPct:0.15, fcPct:0.30,
+      components:[{type:'semi',refId:'s2',qty:100},{type:'ingredient',refId:'i2',qty:60},{type:'ingredient',refId:'i4',qty:20},{type:'ingredient',refId:'i6',qty:150},{type:'ingredient',refId:'i7',qty:1},{type:'ingredient',refId:'i8',qty:1}]},
+  ],
+  wizard: null,
+  editIngredientId: null,
+};
+
+/* ---------- calculation helpers ---------- */
+function ingredientUnitPrice(ing){ return ing.packQty ? ing.price / ing.packQty : 0; }
+function findIngredient(id){ return state.ingredients.find(x=>x.id===id); }
+function findSemi(id){ return state.semiRecipes.find(x=>x.id===id); }
+
+function semiTotalCost(semi){
+  return semi.components.reduce((sum,c)=>{
+    const ing = findIngredient(c.ingredientId);
+    return sum + (ing ? c.qty * ingredientUnitPrice(ing) : 0);
+  },0);
+}
+function semiUnitPrice(semi){ return semi.yieldQty ? semiTotalCost(semi)/semi.yieldQty : 0; }
+
+function componentUnitPrice(c){
+  if(c.type==='ingredient'){ const ing=findIngredient(c.refId); return ing?ingredientUnitPrice(ing):0; }
+  const semi=findSemi(c.refId); return semi?semiUnitPrice(semi):0;
+}
+function componentUnit(c){
+  if(c.type==='ingredient'){ const ing=findIngredient(c.refId); return ing?ing.baseUnit:''; }
+  const semi=findSemi(c.refId); return semi?semi.yieldUnit:'';
+}
+function componentGroup(c){
+  if(c.type==='ingredient'){ const ing=findIngredient(c.refId); return ing?ing.group:'Khác'; }
+  return 'Bán thành phẩm';
+}
+function componentName(c){
+  if(c.type==='ingredient'){ const ing=findIngredient(c.refId); return ing?ing.name:'(đã xoá)'; }
+  const semi=findSemi(c.refId); return semi?semi.name:'(đã xoá)';
+}
+function dishCost(dish){
+  return dish.components.reduce((sum,c)=>sum + c.qty*componentUnitPrice(c),0);
+}
+function dishBreakdown(dish){
+  const groups = {};
+  dish.components.forEach(c=>{
+    const g = componentGroup(c);
+    groups[g] = (groups[g]||0) + c.qty*componentUnitPrice(c);
+  });
+  return groups;
+}
+function suggestedPrice(dish){
+  const cost = dishCost(dish) * (1 + dish.opPct);
+  if(!dish.fcPct) return 0;
+  return Math.round((cost/dish.fcPct)/1000)*1000;
+}
+function actualFoodCostPct(dish){
+  const price = suggestedPrice(dish);
+  if(!price) return 0;
+  return dishCost(dish)*(1+dish.opPct) / price;
+}
+function fmtVND(n){ return Math.round(n).toLocaleString('vi-VN') + 'đ'; }
+function fmtNum(n){ return Number(n).toLocaleString('vi-VN'); }
+
+/* ---------- toast ---------- */
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(window.__toastTimer);
+  window.__toastTimer = setTimeout(()=>t.classList.remove('show'), 2400);
+}
+
+/* ---------- navigation ---------- */
+function go(screen, extra){
+  state.screen = screen;
+  if(extra) Object.assign(state, extra);
+  render();
+  window.scrollTo(0,0);
+}
+
+/* =========================================================
+   RENDER
+========================================================= */
+function render(){
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  if(state.screen==='login'){ app.innerHTML = renderLogin(); attachLoginHandlers(); return; }
+
+  app.innerHTML = renderTopbar() + renderScreenBody();
+  attachHandlers();
+}
+
+function renderTopbar(){
+  const method = state.user?.method==='google' ? 'Google — Drive riêng của bạn' : 'Tài khoản MHKL — đã mã hoá riêng';
+  return `
+  <div class="topbar">
+    <div class="brand">Cost<span>App</span></div>
+    <div class="sync-pill">🔒 ${method}</div>
+  </div>`;
+}
+
+function renderScreenBody(){
+  switch(state.screen){
+    case 'home': return renderHome();
+    case 'ingredients': return renderIngredients();
+    case 'ingredientForm': return renderIngredientForm();
+    case 'semiList': return renderSemiList();
+    case 'semiWizard': return renderSemiWizard();
+    case 'dishWizard': return renderDishWizard();
+    case 'menu': return renderMenu();
+    case 'dishDetail': return renderDishDetail();
+    default: return '';
+  }
+}
+
+/* ---------- LOGIN ---------- */
+function renderLogin(){
+  return `
+  <div class="login-wrap">
+    <svg class="login-cup" viewBox="0 0 70 84" fill="none">
+      <path d="M10 20 H60 L54 74 Q52 80 46 80 H24 Q18 80 16 74 Z" fill="#FFF" stroke="#33281A" stroke-width="3"/>
+      <path d="M14 34 H56 L52 74 Q50.5 78 46 78 H24 Q19.5 78 18 74 Z" fill="#F0A319"/>
+      <path d="M60 26 Q70 26 68 38 Q66 48 56 46" stroke="#33281A" stroke-width="3" fill="none"/>
+      <rect x="6" y="16" width="58" height="7" rx="3.5" fill="#33281A"/>
+    </svg>
+    <h1>Tính Cost &amp; Giá Bán</h1>
+    <p>Công cụ dành riêng cho học viên<br>Trương Dáng Hương Academy</p>
+
+    <button class="btn btn-primary" onclick="mockLogin('google')">
+      <span>🔵</span> Đăng nhập bằng Google
+    </button>
+    <div class="hint" style="text-align:center;margin-top:8px;">Dữ liệu sẽ tự lưu vào Google Sheet riêng trong Drive của bạn</div>
+
+    <div class="divider">hoặc</div>
+
+    <div class="login-form">
+      <label>Mã học viên (do trung tâm cấp)</label>
+      <input type="text" id="mhklUser" placeholder="VD: HV2026-014">
+      <label>Mật khẩu</label>
+      <input type="password" id="mhklPass" placeholder="••••••••">
+      <div class="btn-row" style="margin-top:18px;">
+        <button class="btn btn-outline" onclick="mockLogin('mhkl')">Đăng nhập</button>
+      </div>
+    </div>
+
+    <p style="font-size:12px;margin-top:36px;color:#9A8F7A;">
+      🔒 Dữ liệu công thức &amp; giá của bạn được cách ly hoàn toàn với các học viên khác.
+    </p>
+  </div>`;
+}
+function attachLoginHandlers(){}
+function mockLogin(method){
+  state.user = {name: method==='google' ? 'Học viên (Google)' : 'Học viên HV2026-014', method};
+  toast(method==='google' ? '✅ Đăng nhập Google thành công (demo)' : '✅ Đăng nhập thành công (demo)');
+  go('home');
+}
+
+/* ---------- HOME ---------- */
+function renderHome(){
+  return `
+  <div class="screen">
+    <h1 class="page-title">Chào bạn 👋</h1>
+    <p class="page-sub">Bạn muốn làm gì hôm nay?</p>
+
+    <button class="home-tile highlight" onclick="startDishWizard()">
+      <div class="icon">🍹</div>
+      <div class="txt"><div class="t">Tính giá món mới</div><div class="s">Chọn nguyên liệu → xem giá bán đề xuất</div></div>
+    </button>
+
+    <button class="home-tile" onclick="go('menu')">
+      <div class="icon">📊</div>
+      <div class="txt"><div class="t">Menu &amp; giá bán của tôi</div><div class="s">${state.dishes.length} món đã lưu</div></div>
+    </button>
+
+    <button class="home-tile" onclick="go('semiList')">
+      <div class="icon">🧪</div>
+      <div class="txt"><div class="t">Công thức nền</div><div class="s">Trà nền, cà phê nền... — ${state.semiRecipes.length} công thức</div></div>
+    </button>
+
+    <button class="home-tile" onclick="go('ingredients')">
+      <div class="icon">🧾</div>
+      <div class="txt"><div class="t">Nguyên liệu của tôi</div><div class="s">${state.ingredients.length} nguyên liệu — giá mua &amp; đơn giá</div></div>
+    </button>
+  </div>`;
+}
+
+/* ---------- INGREDIENTS ---------- */
+function renderIngredients(){
+  const rows = state.ingredients.map(ing=>`
+    <div class="card">
+      <div class="card-row">
+        <div>
+          <div class="card-title">${ing.name}</div>
+          <div class="card-sub">${ing.group} · ${ing.buyUnit} · ${fmtVND(ing.price)}</div>
+        </div>
+        <div class="card-value">${ingredientUnitPrice(ing).toLocaleString('vi-VN',{maximumFractionDigits:1})}đ/${ing.baseUnit}</div>
+      </div>
+    </div>`).join('');
+  return `
+  <div class="screen">
+    <button class="btn-ghost" onclick="go('home')">← Trang chủ</button>
+    <h1 class="page-title">Nguyên liệu của tôi</h1>
+    <p class="page-sub">Giá mua thực tế — app tự quy đổi ra đơn giá theo gram / ml / cái.</p>
+    <button class="btn btn-primary" style="margin-bottom:16px;" onclick="go('ingredientForm')">+ Thêm nguyên liệu</button>
+    ${rows}
+  </div>`;
+}
+
+function renderIngredientForm(){
+  const opts = GROUPS.map(g=>`<option value="${g}">${g}</option>`).join('');
+  return `
+  <div class="screen">
+    <button class="btn-ghost" onclick="go('ingredients')">← Quay lại</button>
+    <h1 class="page-title">Thêm nguyên liệu</h1>
+    <label>Tên nguyên liệu</label>
+    <input type="text" id="f_name" placeholder="VD: Trà ô long">
+    <label>Nhóm</label>
+    <select id="f_group">${opts}</select>
+    <label>Quy cách mua (VD: Túi 500g)</label>
+    <input type="text" id="f_buyUnit" placeholder="Túi 500g">
+    <div class="settings-grid" style="margin-top:16px;">
+      <div>
+        <label>Số lượng / quy cách</label>
+        <input type="number" id="f_packQty" placeholder="500">
+      </div>
+      <div>
+        <label>Đơn vị tính</label>
+        <select id="f_baseUnit"><option value="g">gram (g)</option><option value="ml">ml</option><option value="cái">cái</option></select>
+      </div>
+    </div>
+    <label>Giá mua (VNĐ)</label>
+    <input type="number" id="f_price" placeholder="90000">
+    <button class="btn btn-primary" style="margin-top:22px;" onclick="saveIngredient()">Lưu nguyên liệu</button>
+  </div>`;
+}
+function saveIngredient(){
+  const name = document.getElementById('f_name').value.trim();
+  const packQty = parseFloat(document.getElementById('f_packQty').value);
+  const price = parseFloat(document.getElementById('f_price').value);
+  if(!name || !packQty || !price){ toast('⚠️ Vui lòng nhập đủ thông tin'); return; }
+  state.ingredients.push({
+    id: nextId(), name,
+    group: document.getElementById('f_group').value,
+    buyUnit: document.getElementById('f_buyUnit').value || '—',
+    packQty, baseUnit: document.getElementById('f_baseUnit').value, price
+  });
+  toast('✅ Đã lưu nguyên liệu (sẽ đồng bộ Sheet ở bản đầy đủ)');
+  go('ingredients');
+}
+
+/* ---------- SEMI RECIPES ---------- */
+function renderSemiList(){
+  const rows = state.semiRecipes.map(s=>`
+    <div class="card">
+      <div class="card-row">
+        <div>
+          <div class="card-title">${s.name}</div>
+          <div class="card-sub">Mẻ ${s.components.length} nguyên liệu → ra ${fmtNum(s.yieldQty)} ${s.yieldUnit}</div>
+        </div>
+        <div class="card-value">${semiUnitPrice(s).toLocaleString('vi-VN',{maximumFractionDigits:1})}đ/${s.yieldUnit}</div>
+      </div>
+    </div>`).join('') || `<div class="empty-state"><div class="big">🧪</div>Chưa có công thức nền nào</div>`;
+  return `
+  <div class="screen">
+    <button class="btn-ghost" onclick="go('home')">← Trang chủ</button>
+    <h1 class="page-title">Công thức nền</h1>
+    <p class="page-sub">Trà nền, cà phê nền... nấu 1 mẻ rồi dùng dần cho nhiều món.</p>
+    <button class="btn btn-primary" style="margin-bottom:16px;" onclick="startSemiWizard()">+ Thêm công thức nền</button>
+    ${rows}
+  </div>`;
+}
+
+function startSemiWizard(){
+  state.wizard = {step:1, name:'', components:[], yieldQty:'', yieldUnit:'ml'};
+  go('semiWizard');
+}
+function semiWizardIngredientOptions(){
+  return state.ingredients.map(i=>`<option value="${i.id}">${i.name} (${i.baseUnit})</option>`).join('');
+}
+function renderSemiWizard(){
+  const w = state.wizard;
+  const totalSoFar = w.components.reduce((s,c)=>{
+    const ing = findIngredient(c.ingredientId);
+    return s + (ing? c.qty*ingredientUnitPrice(ing):0);
+  },0);
+
+  let body = '';
+  if(w.step===1){
+    body = `
+      <label>Đặt tên công thức nền</label>
+      <input type="text" id="w_name" value="${w.name}" placeholder="VD: Cà phê nền">
+      <div class="hint">Đây là tên bạn sẽ chọn lại khi lên món (VD: Cà phê đen đá dùng 50ml Cà phê nền)</div>
+      <button class="btn btn-primary" style="margin-top:22px;" onclick="semiStep1Next()">Tiếp tục</button>`;
+  } else if(w.step===2){
+    const list = w.components.map((c,idx)=>{
+      const ing = findIngredient(c.ingredientId);
+      return `<div class="comp-row"><div class="info"><div class="n">${ing?ing.name:'?'}</div><div class="m">${fmtNum(c.qty)} ${ing?ing.baseUnit:''}</div></div><button class="remove" onclick="removeSemiComponent(${idx})">✕</button></div>`;
+    }).join('');
+    body = `
+      <div class="card">
+        <label style="margin-top:0;">Nguyên liệu</label>
+        <select id="w_ing">${semiWizardIngredientOptions()}</select>
+        <label>Định mức cho cả mẻ</label>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <input type="number" id="w_qty" placeholder="200" style="flex:1;">
+          <span class="unit-badge" id="w_unitBadge">${state.ingredients[0]?state.ingredients[0].baseUnit:''}</span>
+        </div>
+        <button class="btn btn-outline btn-sm" style="margin-top:14px;" onclick="addSemiComponent()">+ Thêm vào công thức</button>
+      </div>
+      ${list}
+      <div class="card-sub" style="margin:10px 0 4px;">Tổng cost mẻ hiện tại: <b>${fmtVND(totalSoFar)}</b></div>
+      <div class="btn-row">
+        <button class="btn btn-outline" onclick="wizardBack()">← Quay lại</button>
+        <button class="btn btn-primary" onclick="semiStep2Next()">Tiếp tục</button>
+      </div>`;
+  } else if(w.step===3){
+    body = `
+      <div class="card"><div class="card-sub">Tổng cost cả mẻ</div><div class="card-title">${fmtVND(totalSoFar)}</div></div>
+      <label>Sản lượng thành phẩm thực tế thu được</label>
+      <div style="display:flex;gap:10px;">
+        <input type="number" id="w_yieldQty" value="${w.yieldQty}" placeholder="1700" style="flex:2;">
+        <select id="w_yieldUnit" style="flex:1;">
+          <option value="ml" ${w.yieldUnit==='ml'?'selected':''}>ml</option>
+          <option value="g" ${w.yieldUnit==='g'?'selected':''}>g</option>
+        </select>
+      </div>
+      <div class="hint">VD: nấu 2000ml nước chỉ ra được 1700ml do bã hút nước — nhập đúng số thực tế đo được.</div>
+      <div class="btn-row">
+        <button class="btn btn-outline" onclick="wizardBack()">← Quay lại</button>
+        <button class="btn btn-primary" onclick="semiStep3Next()">Xem kết quả</button>
+      </div>`;
+  } else if(w.step===4){
+    const yieldQty = parseFloat(document.getElementById && document.getElementById('w_yieldQty_hidden')?.value) || w.yieldQty;
+    const unitPrice = w.yieldQty ? totalSoFar / w.yieldQty : 0;
+    body = `
+      <div class="price-hero">
+        <div class="lbl">Đơn giá / ${w.yieldUnit}</div>
+        <div class="val">${unitPrice.toLocaleString('vi-VN',{maximumFractionDigits:2})}đ</div>
+        <div class="card-sub">${fmtVND(totalSoFar)} ÷ ${fmtNum(w.yieldQty)} ${w.yieldUnit}</div>
+      </div>
+      <button class="btn btn-primary" onclick="saveSemi()">✅ Lưu công thức nền</button>
+      <button class="btn btn-ghost" onclick="wizardBack()">← Quay lại chỉnh sửa</button>`;
+  }
+
+  return `
+  <div class="screen">
+    ${wizardHead(w.step,4,'#6A3D9A')}
+    <h1 class="page-title">${w.name || 'Công thức nền mới'}</h1>
+    ${body}
+  </div>`;
+}
+function semiStep1Next(){
+  const name = document.getElementById('w_name').value.trim();
+  if(!name){ toast('⚠️ Nhập tên công thức nền'); return; }
+  state.wizard.name = name; state.wizard.step = 2; render();
+}
+function addSemiComponent(){
+  const ingId = document.getElementById('w_ing').value;
+  const qty = parseFloat(document.getElementById('w_qty').value);
+  if(!qty){ toast('⚠️ Nhập định mức'); return; }
+  state.wizard.components.push({ingredientId:ingId, qty});
+  render();
+}
+function removeSemiComponent(idx){ state.wizard.components.splice(idx,1); render(); }
+function semiStep2Next(){
+  if(state.wizard.components.length===0){ toast('⚠️ Thêm ít nhất 1 nguyên liệu'); return; }
+  state.wizard.step = 3; render();
+}
+function semiStep3Next(){
+  const yq = parseFloat(document.getElementById('w_yieldQty').value);
+  const yu = document.getElementById('w_yieldUnit').value;
+  if(!yq){ toast('⚠️ Nhập sản lượng thành phẩm'); return; }
+  state.wizard.yieldQty = yq; state.wizard.yieldUnit = yu; state.wizard.step = 4; render();
+}
+function saveSemi(){
+  const w = state.wizard;
+  state.semiRecipes.push({id: nextId(), name:w.name, components:w.components, yieldQty:w.yieldQty, yieldUnit:w.yieldUnit});
+  toast('✅ Đã lưu công thức nền (sẽ đồng bộ Sheet ở bản đầy đủ)');
+  state.wizard = null;
+  go('semiList');
+}
+
+/* ---------- DISH WIZARD ---------- */
+function startDishWizard(){
+  state.wizard = {step:1, name:'', components:[], opPct:0.15, fcPct:0.30};
+  go('dishWizard');
+}
+function dishComponentOptions(){
+  const rawOpts = state.ingredients.map(i=>`<option value="ingredient:${i.id}">${i.name} (${i.baseUnit})</option>`).join('');
+  const semiOpts = state.semiRecipes.map(s=>`<option value="semi:${s.id}">⭐ ${s.name} (${s.yieldUnit})</option>`).join('');
+  return `<optgroup label="Bán thành phẩm">${semiOpts}</optgroup><optgroup label="Nguyên liệu thô">${rawOpts}</optgroup>`;
+}
+function renderDishWizard(){
+  const w = state.wizard;
+  const cost = w.components.reduce((s,c)=>s + c.qty*componentUnitPrice(c),0);
+
+  let body = '';
+  if(w.step===1){
+    body = `
+      <label>Đặt tên món</label>
+      <input type="text" id="w_name" value="${w.name}" placeholder="VD: Cà phê đen đá">
+      <button class="btn btn-primary" style="margin-top:22px;" onclick="dishStep1Next()">Tiếp tục</button>`;
+  } else if(w.step===2){
+    const list = w.components.map((c,idx)=>`
+      <div class="comp-row">
+        <div class="info"><div class="n">${componentName(c)}</div><div class="m">${fmtNum(c.qty)} ${componentUnit(c)} · ${fmtVND(c.qty*componentUnitPrice(c))}</div></div>
+        <button class="remove" onclick="removeDishComponent(${idx})">✕</button>
+      </div>`).join('');
+    body = `
+      <div class="card">
+        <label style="margin-top:0;">Thành phần (bán thành phẩm hoặc nguyên liệu)</label>
+        <select id="w_comp">${dishComponentOptions()}</select>
+        <label>Định mức sử dụng</label>
+        <input type="number" id="w_qty" placeholder="50">
+        <button class="btn btn-outline btn-sm" style="margin-top:14px;" onclick="addDishComponent()">+ Thêm vào món</button>
+      </div>
+      ${list || '<div class="hint">Chưa có thành phần nào — thêm ở trên.</div>'}
+      <div class="card-sub" style="margin:10px 0 4px;">Cost nguyên liệu hiện tại: <b>${fmtVND(cost)}</b></div>
+      <div class="btn-row">
+        <button class="btn btn-outline" onclick="wizardBack()">← Quay lại</button>
+        <button class="btn btn-primary" onclick="dishStep2Next()">Tiếp tục</button>
+      </div>`;
+  } else if(w.step===3){
+    const withOp = cost*(1+w.opPct);
+    const price = w.fcPct ? Math.round((withOp/w.fcPct)/1000)*1000 : 0;
+    body = `
+      <div class="card"><div class="card-sub">Cost nguyên liệu</div><div class="card-title">${fmtVND(cost)}</div></div>
+      <label>% Chi phí vận hành</label>
+      <select id="w_opPct" class="g-select" onchange="dishSettingsPreview()">
+        ${[0.10,0.15,0.20,0.25].map(v=>`<option value="${v}" ${v===w.opPct?'selected':''}>${Math.round(v*100)}%</option>`).join('')}
+      </select>
+      <label>% Food cost mục tiêu</label>
+      <select id="w_fcPct" class="g-select" onchange="dishSettingsPreview()">
+        ${[0.25,0.28,0.30,0.32,0.35].map(v=>`<option value="${v}" ${v===w.fcPct?'selected':''}>${Math.round(v*100)}%</option>`).join('')}
+      </select>
+      <div class="price-hero" id="pricePreview">
+        <div class="lbl">Giá bán đề xuất</div>
+        <div class="val">${fmtVND(price)}</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-outline" onclick="wizardBack()">← Quay lại</button>
+        <button class="btn btn-primary" onclick="dishStep3Next()">Xem kết quả</button>
+      </div>`;
+  } else if(w.step===4){
+    const dishDraft = {components:w.components, opPct:w.opPct, fcPct:w.fcPct};
+    const breakdown = dishBreakdown(dishDraft);
+    const total = Object.values(breakdown).reduce((a,b)=>a+b,0) || 1;
+    const bars = Object.entries(breakdown).map(([g,v])=>`<div style="width:${(v/total*100).toFixed(1)}%;background:${GROUP_COLORS[g]||'#ccc'};"></div>`).join('');
+    const legend = Object.entries(breakdown).filter(([,v])=>v>0).map(([g,v])=>`<span><span class="dot" style="background:${GROUP_COLORS[g]||'#ccc'};"></span>${g}: ${fmtVND(v)}</span>`).join('');
+    const price = suggestedPrice(dishDraft);
+    const fc = actualFoodCostPct(dishDraft);
+    body = `
+      <div class="price-hero">
+        <div class="lbl">Giá bán đề xuất</div>
+        <div class="val">${fmtVND(price)}</div>
+        <span class="fc-badge ${fc<=0.32?'fc-good':'fc-warn'}">Food cost ${(fc*100).toFixed(1)}%</span>
+      </div>
+      <div class="legend">${legend}</div>
+      <div class="breakdown-bar">${bars}</div>
+      <button class="btn btn-primary" onclick="saveDish()">✅ Lưu món này</button>
+      <button class="btn btn-ghost" onclick="wizardBack()">← Quay lại chỉnh sửa</button>`;
+  }
+
+  return `
+  <div class="screen">
+    ${wizardHead(w.step,4,'#F0A319')}
+    <h1 class="page-title">${w.name || 'Món mới'}</h1>
+    ${body}
+  </div>`;
+}
+function dishStep1Next(){
+  const name = document.getElementById('w_name').value.trim();
+  if(!name){ toast('⚠️ Nhập tên món'); return; }
+  state.wizard.name = name; state.wizard.step = 2; render();
+}
+function addDishComponent(){
+  const raw = document.getElementById('w_comp').value;
+  const qty = parseFloat(document.getElementById('w_qty').value);
+  if(!qty){ toast('⚠️ Nhập định mức'); return; }
+  const [type, refId] = raw.split(':');
+  state.wizard.components.push({type, refId, qty});
+  render();
+}
+function removeDishComponent(idx){ state.wizard.components.splice(idx,1); render(); }
+function dishStep2Next(){
+  if(state.wizard.components.length===0){ toast('⚠️ Thêm ít nhất 1 thành phần'); return; }
+  state.wizard.step = 3; render();
+}
+function dishSettingsPreview(){
+  state.wizard.opPct = parseFloat(document.getElementById('w_opPct').value);
+  state.wizard.fcPct = parseFloat(document.getElementById('w_fcPct').value);
+  const cost = state.wizard.components.reduce((s,c)=>s + c.qty*componentUnitPrice(c),0);
+  const withOp = cost*(1+state.wizard.opPct);
+  const price = state.wizard.fcPct ? Math.round((withOp/state.wizard.fcPct)/1000)*1000 : 0;
+  document.getElementById('pricePreview').innerHTML = `<div class="lbl">Giá bán đề xuất</div><div class="val">${fmtVND(price)}</div>`;
+}
+function dishStep3Next(){ state.wizard.step = 4; render(); }
+function saveDish(){
+  const w = state.wizard;
+  state.dishes.push({id: nextId(), name:w.name, components:w.components, opPct:w.opPct, fcPct:w.fcPct});
+  toast('✅ Đã lưu món (sẽ đồng bộ Sheet ở bản đầy đủ)');
+  state.wizard = null;
+  go('menu');
+}
+
+function wizardBack(){
+  if(state.wizard.step>1){ state.wizard.step--; render(); }
+  else { state.wizard=null; go(state.screen==='dishWizard'?'home':'semiList'); }
+}
+function wizardHead(step,total,color){
+  const dots = Array.from({length:total}).map((_,i)=>`<div class="step-dot ${i<step?'done':''}"></div>`).join('');
+  const pct = Math.min(100, Math.round(step/total*100));
+  return `
+  <div class="wizard-head">
+    <svg class="cup" viewBox="0 0 40 48" fill="none">
+      <path d="M6 12h28l-4 32a4 4 0 0 1-4 3.6H14A4 4 0 0 1 10 44Z" fill="#fff" stroke="#33281A" stroke-width="2.4"/>
+      <clipPath id="cupclip"><path d="M6 12h28l-4 32a4 4 0 0 1-4 3.6H14A4 4 0 0 1 10 44Z"/></clipPath>
+      <rect x="4" y="${47-(pct*0.32)}" width="32" height="40" fill="${color}" clip-path="url(#cupclip)"/>
+      <rect x="3" y="9" width="34" height="4.5" rx="2.2" fill="#33281A"/>
+    </svg>
+    <div class="steps-row">${dots}</div>
+  </div>
+  <div class="step-label">Bước ${step}/${total}</div>`;
+}
+
+/* ---------- MENU ---------- */
+function renderMenu(){
+  const rows = state.dishes.map(d=>{
+    const fc = actualFoodCostPct(d);
+    return `
+    <div class="card card-tap" onclick="go('dishDetail',{selectedDishId:'${d.id}'})">
+      <div class="card-row">
+        <div>
+          <div class="card-title">${d.name}</div>
+          <div class="card-sub">Cost ${fmtVND(dishCost(d))} · <span class="fc-badge ${fc<=0.32?'fc-good':'fc-warn'}" style="padding:2px 8px;">FC ${(fc*100).toFixed(1)}%</span></div>
+        </div>
+        <div class="card-value">${fmtVND(suggestedPrice(d))}</div>
+      </div>
+    </div>`;
+  }).join('') || `<div class="empty-state"><div class="big">🍹</div>Chưa có món nào — bấm "Tính giá món mới" ở trang chủ.</div>`;
+  return `
+  <div class="screen">
+    <button class="btn-ghost" onclick="go('home')">← Trang chủ</button>
+    <h1 class="page-title">Menu &amp; giá bán</h1>
+    <p class="page-sub">Chạm vào món để xem chi tiết cost.</p>
+    <button class="btn btn-primary" style="margin-bottom:16px;" onclick="startDishWizard()">+ Tính giá món mới</button>
+    ${rows}
+  </div>`;
+}
+
+function renderDishDetail(){
+  const d = state.dishes.find(x=>x.id===state.selectedDishId);
+  if(!d) return `<div class="screen"><button class="btn-ghost" onclick="go('menu')">← Menu</button><div class="empty-state">Không tìm thấy món.</div></div>`;
+  const breakdown = dishBreakdown(d);
+  const total = Object.values(breakdown).reduce((a,b)=>a+b,0) || 1;
+  const bars = Object.entries(breakdown).map(([g,v])=>`<div style="width:${(v/total*100).toFixed(1)}%;background:${GROUP_COLORS[g]||'#ccc'};"></div>`).join('');
+  const legend = Object.entries(breakdown).filter(([,v])=>v>0).map(([g,v])=>`<span><span class="dot" style="background:${GROUP_COLORS[g]||'#ccc'};"></span>${g}: ${fmtVND(v)}</span>`).join('');
+  const compRows = d.components.map(c=>`
+    <div class="comp-row">
+      <div class="info"><div class="n">${componentName(c)}</div><div class="m">${fmtNum(c.qty)} ${componentUnit(c)}</div></div>
+      <div class="card-value" style="font-size:14px;">${fmtVND(c.qty*componentUnitPrice(c))}</div>
+    </div>`).join('');
+  const fc = actualFoodCostPct(d);
+  return `
+  <div class="screen">
+    <button class="btn-ghost" onclick="go('menu')">← Menu</button>
+    <h1 class="page-title">${d.name}</h1>
+    <div class="price-hero">
+      <div class="lbl">Giá bán đề xuất</div>
+      <div class="val">${fmtVND(suggestedPrice(d))}</div>
+      <span class="fc-badge ${fc<=0.32?'fc-good':'fc-warn'}">Food cost ${(fc*100).toFixed(1)}%</span>
+    </div>
+    <div class="legend">${legend}</div>
+    <div class="breakdown-bar">${bars}</div>
+    <label style="margin-top:22px;">Thành phần</label>
+    ${compRows}
+    <button class="btn btn-danger" style="margin-top:18px;" onclick="deleteDish('${d.id}')">Xoá món này</button>
+  </div>`;
+}
+function deleteDish(id){
+  state.dishes = state.dishes.filter(d=>d.id!==id);
+  toast('🗑️ Đã xoá món');
+  go('menu');
+}
+
+/* ---------- misc ---------- */
+function attachHandlers(){
+  const wIng = document.getElementById('w_ing');
+  if(wIng){ wIng.addEventListener('change', ()=>{
+    const ing = findIngredient(wIng.value);
+    const badge = document.getElementById('w_unitBadge');
+    if(ing && badge) badge.textContent = ing.baseUnit;
+  }); }
+}
+
+render();
+</script>
+</body>
+</html>
