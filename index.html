@@ -146,6 +146,9 @@
 <div id="fullLoading" class="full-loading" style="display:none;">
   <div class="spinner"></div>
   <div id="fullLoadingText" class="full-loading-text">Đang tải...</div>
+  <div id="fullLoadingCancel" style="display:none;">
+    <button class="btn btn-ghost btn-sm" onclick="cancelRestore()">Bỏ qua, vào màn đăng nhập</button>
+  </div>
 </div>
 
 <script>
@@ -179,11 +182,19 @@ const TABS = {
 let accessToken = null;   // token OAuth của học viên đăng nhập Google
 let tokenClient = null;
 
-function showFullLoading(text){
+function showFullLoading(text, showCancel){
   document.getElementById('fullLoadingText').textContent = text;
   document.getElementById('fullLoading').style.display = 'flex';
+  document.getElementById('fullLoadingCancel').style.display = showCancel ? 'block' : 'none';
 }
 function hideFullLoading(){ document.getElementById('fullLoading').style.display = 'none'; }
+function cancelRestore(){
+  if(window.__restoreTimeout){ clearTimeout(window.__restoreTimeout); window.__restoreTimeout = null; }
+  isAutoRestoring = false;
+  clearSessionCache();
+  hideFullLoading();
+  render();
+}
 
 /* ---- chuyển đổi state (dạng lồng nhau) <-> tabs (dạng bảng phẳng) ---- */
 function stateToTabs(){
@@ -239,6 +250,7 @@ function initGoogleAuth(){
     client_id: GOOGLE_CLIENT_ID,
     scope: 'https://www.googleapis.com/auth/drive.file',
     callback: async (resp)=>{
+      if(window.__restoreTimeout){ clearTimeout(window.__restoreTimeout); window.__restoreTimeout = null; }
       const wasAutoRestoring = isAutoRestoring;
       isAutoRestoring = false;
       if(resp.error){
@@ -364,15 +376,21 @@ async function syncToCloud(){
 }
 
 /* ---- tự khôi phục phiên đăng nhập khi tải lại trang ---- */
+function withTimeout(promise, ms){
+  return Promise.race([
+    promise,
+    new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')), ms))
+  ]);
+}
 async function tryRestoreSession(){
   const cached = loadSessionCache();
   if(!cached){ render(); return; }
 
   if(cached.method==='mhkl'){
     if(MHKL_DEMO){ render(); return; }
-    showFullLoading('Đang khôi phục phiên đăng nhập...');
+    showFullLoading('Đang khôi phục phiên đăng nhập...', true);
     try{
-      const loadRes = await callAppsScript({action:'load', token: cached.token});
+      const loadRes = await withTimeout(callAppsScript({action:'load', token: cached.token}), 8000);
       if(loadRes.ok){
         state.user = {name:cached.name, method:'mhkl', token:cached.token};
         tabsToState(loadRes.data);
@@ -389,8 +407,19 @@ async function tryRestoreSession(){
 
   if(cached.method==='google'){
     if(GOOGLE_DEMO || !tokenClient){ render(); return; }
-    showFullLoading('Đang khôi phục phiên đăng nhập...');
+    showFullLoading('Đang khôi phục phiên đăng nhập...', true);
     isAutoRestoring = true;
+    // Nếu Google không phản hồi trong 6 giây (thường do trình duyệt chặn cookie bên
+    // thứ 3 với app chưa xác minh), tự huỷ và quay lại màn đăng nhập thay vì treo mãi.
+    window.__restoreTimeout = setTimeout(()=>{
+      if(isAutoRestoring){
+        isAutoRestoring = false;
+        clearSessionCache();
+        hideFullLoading();
+        render();
+        toast('⏱️ Không khôi phục được phiên cũ, vui lòng đăng nhập lại');
+      }
+    }, 6000);
     tokenClient.requestAccessToken({prompt:''}); // thử lấy token ngầm, không hiện popup nếu còn phiên Google hợp lệ
     return;
   }
