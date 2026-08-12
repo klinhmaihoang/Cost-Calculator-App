@@ -175,9 +175,9 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 const TABS = {
   Ingredients: ['id','name','group','buyUnit','packQty','baseUnit','price'],
   SemiRecipes: ['id','name','yieldQty','yieldUnit'],
-  SemiComponents: ['id','semiId','ingredientId','qty'],
+  SemiComponents: ['id','semiId','semiName','ingredientId','ingredientName','qty'],
   Dishes: ['id','name','opPct','fcPct'],
-  DishComponents: ['id','dishId','type','refId','qty'],
+  DishComponents: ['id','dishId','dishName','type','typeLabel','refId','componentName','qty'],
 };
 
 // Tên cột hiển thị bằng tiếng Việt — chỉ dùng để GHI dòng tiêu đề cho đẹp/dễ đọc.
@@ -187,9 +187,9 @@ const TABS = {
 const VI_HEADERS = {
   Ingredients: ['Mã','Tên nguyên liệu','Nhóm','Quy cách mua','Số lượng/quy cách','Đơn vị tính','Giá mua (VNĐ)'],
   SemiRecipes: ['Mã','Tên bán thành phẩm','Sản lượng','Đơn vị sản lượng'],
-  SemiComponents: ['Mã','Mã bán thành phẩm','Mã nguyên liệu','Định mức'],
+  SemiComponents: ['Mã','Mã bán thành phẩm','Tên bán thành phẩm','Mã nguyên liệu','Tên nguyên liệu','Định mức'],
   Dishes: ['Mã','Tên món','% Chi phí vận hành','% Food cost mục tiêu'],
-  DishComponents: ['Mã','Mã món','Loại','Mã thành phần','Định mức'],
+  DishComponents: ['Mã','Mã món','Tên món','Loại (mã hệ thống)','Loại','Mã thành phần','Tên thành phần','Định mức'],
 };
 const CURRENCY_COLS = { Ingredients: [7] };  // cột "Giá mua"
 const PERCENT_COLS = { Dishes: [3, 4] };      // cột % chi phí vận hành / % food cost
@@ -223,9 +223,18 @@ function stateToTabs(){
   return {
     Ingredients: state.ingredients.map(i=>({id:i.id,name:i.name,group:i.group,buyUnit:i.buyUnit,packQty:i.packQty,baseUnit:i.baseUnit,price:i.price})),
     SemiRecipes: state.semiRecipes.map(s=>({id:s.id,name:s.name,yieldQty:s.yieldQty,yieldUnit:s.yieldUnit})),
-    SemiComponents: state.semiRecipes.flatMap(s=>s.components.map((c,idx)=>({id:s.id+'_c'+idx, semiId:s.id, ingredientId:c.ingredientId, qty:c.qty}))),
+    SemiComponents: state.semiRecipes.flatMap(s=>s.components.map((c,idx)=>({
+      id:s.id+'_c'+idx, semiId:s.id, semiName:s.name,
+      ingredientId:c.ingredientId, ingredientName:(findIngredient(c.ingredientId)||{}).name||'(đã xoá)',
+      qty:c.qty
+    }))),
     Dishes: state.dishes.map(d=>({id:d.id,name:d.name,opPct:d.opPct,fcPct:d.fcPct})),
-    DishComponents: state.dishes.flatMap(d=>d.components.map((c,idx)=>({id:d.id+'_c'+idx, dishId:d.id, type:c.type, refId:c.refId, qty:c.qty}))),
+    DishComponents: state.dishes.flatMap(d=>d.components.map((c,idx)=>({
+      id:d.id+'_c'+idx, dishId:d.id, dishName:d.name,
+      type:c.type, typeLabel: c.type==='semi' ? 'Bán thành phẩm' : 'Nguyên liệu thô',
+      refId:c.refId, componentName: componentName(c),
+      qty:c.qty
+    }))),
   };
 }
 function tabsToState(tabs){
