@@ -706,9 +706,9 @@ function renderLogin(){
 
     <div class="login-form">
       <label>Mã học viên (do trung tâm cấp)</label>
-      <input type="text" id="mhklUser" placeholder="VD: HV2026-014">
+      <input type="text" id="mhklUser" placeholder="VD: HV2026-014" onkeydown="if(event.key==='Enter') document.getElementById('mhklPass').focus()">
       <label>Mật khẩu</label>
-      <input type="password" id="mhklPass" placeholder="••••••••">
+      <input type="password" id="mhklPass" placeholder="••••••••" onkeydown="if(event.key==='Enter') loginMhkl()">
       <div class="btn-row" style="margin-top:18px;">
         <button class="btn btn-outline" onclick="loginMhkl()">Đăng nhập</button>
       </div>
@@ -1401,7 +1401,7 @@ function renderAdminLogin(){
     <h1>🔧 Trang quản trị</h1>
     <p>Chỉ dành cho MHKL. Nhập mã quản trị (khác mã học viên) để tiếp tục.</p>
     <label style="text-align:left;">Mã quản trị</label>
-    <input type="password" id="adminKeyInput" placeholder="••••••••">
+    <input type="password" id="adminKeyInput" placeholder="••••••••" onkeydown="if(event.key==='Enter') adminLogin()">
     <button class="btn btn-primary" style="margin-top:18px;" onclick="adminLogin()">Vào trang quản trị</button>
   </div>`;
 }
@@ -1632,6 +1632,13 @@ if(!IS_ADMIN_ROUTE){
     await tryRestoreSession();
   });
 }
+
+// Gõ/xoá #admin trên thanh địa chỉ rồi bấm Enter chỉ đổi hash, KHÔNG tự tải lại
+// trang (cùng URL gốc) — nếu không bắt sự kiện này, app phải chờ hard refresh
+// mới nhận ra và chuyển đúng màn.
+window.addEventListener('hashchange', ()=>{
+  location.reload();
+});
 </script>
 </body>
 </html>
