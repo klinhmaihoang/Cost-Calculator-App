@@ -249,7 +249,7 @@ function initGoogleAuth(){
   if(GOOGLE_DEMO || !window.google) return;
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: GOOGLE_CLIENT_ID,
-    scope: 'https://www.googleapis.com/auth/drive.file',
+    scope: 'https://www.googleapis.com/auth/drive.file email profile',
     callback: async (resp)=>{
       if(window.__restoreTimeout){ clearTimeout(window.__restoreTimeout); window.__restoreTimeout = null; }
       state.pendingGoogleRestore = null;
@@ -320,12 +320,38 @@ async function readAllTabs(sheetId){
   return out;
 }
 async function afterGoogleLogin(){
-  showFullLoading('Đang chuẩn bị dữ liệu...');
+  showFullLoading('Đang kiểm tra tài khoản...');
   try{
+    // Lấy email để đối chiếu với danh sách MHKL đã duyệt (mục Admin > Đăng nhập Google)
+    let email = '';
+    try{
+      const profRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {headers:{Authorization:'Bearer '+accessToken}});
+      const prof = await profRes.json();
+      email = prof.email || '';
+    }catch(e){}
+
+    if(!MHKL_DEMO){
+      if(!email){
+        hideFullLoading();
+        toast('⚠️ Không xác minh được tài khoản Google, vui lòng thử lại');
+        render();
+        return;
+      }
+      const check = await callAppsScript({action:'check_google_approved', email});
+      if(!check.ok){
+        hideFullLoading();
+        state.pendingApprovalEmail = email;
+        accessToken = null;
+        go('googlePending');
+        return;
+      }
+    }
+
+    showFullLoading('Đang chuẩn bị dữ liệu...');
     let sheetId = await findAppSpreadsheet();
     let isNew = false;
     if(!sheetId){ sheetId = await createAppSpreadsheet(); isNew = true; }
-    state.user = {name:'Học viên (Google)', method:'google', sheetId};
+    state.user = {name: email || 'Học viên (Google)', method:'google', sheetId};
     if(!isNew){ tabsToState(await readAllTabs(sheetId)); }
     saveSessionCache();
     hideFullLoading();
@@ -485,6 +511,11 @@ const state = {
   selected: { ingredients:new Set(), semi:new Set(), dishes:new Set() },
   adminKey: null,
   adminAccounts: [],
+  adminTab: 'students',
+  adminEditingUsername: null,
+  adminRevealed: new Set(),
+  adminGoogle: { approved:[], pending:[] },
+  pendingApprovalEmail: null,
 };
 
 /* ---------- calculation helpers ---------- */
@@ -598,9 +629,19 @@ function render(){
   if(state.screen==='adminLogin'){ app.innerHTML = renderAdminLogin(); return; }
   if(state.screen==='adminHome'){ app.innerHTML = renderAdminTopbar() + renderAdminHome(); return; }
   if(state.screen==='login'){ app.innerHTML = renderLogin(); attachLoginHandlers(); return; }
+  if(state.screen==='googlePending'){ app.innerHTML = renderGooglePending(); return; }
 
   app.innerHTML = renderTopbar() + renderScreenBody();
   attachHandlers();
+}
+function renderGooglePending(){
+  return `
+  <div class="login-wrap">
+    <h1>⏳ Đang chờ duyệt</h1>
+    <p>Tài khoản Google <b>${state.pendingApprovalEmail || ''}</b> chưa được cấp quyền sử dụng app này.</p>
+    <p>Vui lòng liên hệ Trương Dáng Hương Academy để được duyệt quyền truy cập, sau đó quay lại đăng nhập lại.</p>
+    <button class="btn btn-outline" style="margin-top:20px;" onclick="go('login')">← Quay lại màn đăng nhập</button>
+  </div>`;
 }
 
 function renderTopbar(){
@@ -1345,14 +1386,14 @@ function attachHandlers(){
 
 /* =========================================================
    ADMIN (chỉ MHKL dùng) — truy cập qua URL riêng, có thêm
-   ?admin ở cuối link app, VD:
+   #admin ở cuối link app, VD:
    https://klinhmaihoang.github.io/Cost-Calculator-App/#admin
    Học viên vào link bình thường sẽ KHÔNG bao giờ thấy màn này.
    Mọi thao tác đều được backend kiểm tra lại mã quản trị (ADMIN_KEY
    trong Code.gs) — không chỉ dựa vào việc "giấu" đường dẫn.
 ========================================================= */
 function renderAdminTopbar(){
-  return `<div class="topbar"><div class="brand">Cost<span>App</span> · <span style="color:var(--plum,#6A3D9A);">Admin</span></div></div>`;
+  return `<div class="topbar"><div class="brand">Cost<span>App</span> · <span style="color:#6A3D9A;">Admin</span></div></div>`;
 }
 function renderAdminLogin(){
   return `
@@ -1371,54 +1412,13 @@ async function adminLogin(){
   showFullLoading('Đang kiểm tra...');
   try{
     const res = await callAppsScript({action:'admin_list', adminKey:key});
-    hideFullLoading();
-    if(!res.ok){ toast('⚠️ '+(res.error||'Sai mã quản trị')); return; }
+    if(!res.ok){ hideFullLoading(); toast('⚠️ '+(res.error||'Sai mã quản trị')); return; }
     state.adminKey = key;
     state.adminAccounts = res.accounts;
-    go('adminHome');
-  }catch(e){
+    const gRes = await callAppsScript({action:'admin_google_list', adminKey:key});
+    if(gRes.ok) state.adminGoogle = {approved:gRes.approved, pending:gRes.pending};
     hideFullLoading();
-    toast('⚠️ Lỗi kết nối máy chủ');
-  }
-}
-function renderAdminHome(){
-  const accs = state.adminAccounts || [];
-  const rows = accs.map(a=>`
-    <div class="card">
-      <div class="card-title">${a.username}</div>
-      <div class="card-sub">${a.displayName || '(chưa đặt tên)'} · tạo ${a.createdAt ? new Date(a.createdAt).toLocaleDateString('vi-VN') : '—'}</div>
-    </div>`).join('') || `<div class="empty-state">Chưa có tài khoản học viên nào</div>`;
-  return `
-  <div class="screen">
-    <h1 class="page-title">Tạo tài khoản học viên</h1>
-    <p class="page-sub">Điền thông tin rồi bấm tạo — hệ thống tự tạo 1 Google Sheet dữ liệu riêng cho học viên đó.</p>
-    <div class="card">
-      <label style="margin-top:0;">Mã học viên</label>
-      <input type="text" id="a_username" placeholder="VD: HV2026-015">
-      <label>Mật khẩu tạm</label>
-      <input type="text" id="a_password" placeholder="VD: trada2026">
-      <label>Tên học viên</label>
-      <input type="text" id="a_name" placeholder="Nguyễn Thị A">
-      <button class="btn btn-primary" style="margin-top:16px;" onclick="adminCreateAccount()">+ Tạo tài khoản</button>
-    </div>
-    <label>Đã tạo (${accs.length})</label>
-    ${rows}
-    <button class="btn-ghost" style="margin-top:20px;" onclick="adminLogout()">Thoát khỏi trang quản trị</button>
-  </div>`;
-}
-async function adminCreateAccount(){
-  const username = document.getElementById('a_username').value.trim();
-  const password = document.getElementById('a_password').value;
-  const displayName = document.getElementById('a_name').value.trim();
-  if(!username || !password){ toast('⚠️ Nhập đủ mã học viên và mật khẩu'); return; }
-  showFullLoading('Đang tạo tài khoản...');
-  try{
-    const res = await callAppsScript({action:'admin_create', adminKey: state.adminKey, username, password, displayName});
-    hideFullLoading();
-    if(!res.ok){ toast('⚠️ '+(res.error||'Tạo thất bại')); return; }
-    toast(`✅ Đã tạo tài khoản ${username} — gửi mã + mật khẩu cho học viên`);
-    const listRes = await callAppsScript({action:'admin_list', adminKey: state.adminKey});
-    if(listRes.ok) state.adminAccounts = listRes.accounts;
+    state.adminTab = 'students';
     go('adminHome');
   }catch(e){
     hideFullLoading();
@@ -1426,10 +1426,200 @@ async function adminCreateAccount(){
   }
 }
 function adminLogout(){
-  state.adminKey = null;
-  state.adminAccounts = [];
+  state.adminKey = null; state.adminAccounts = []; state.adminGoogle = {approved:[],pending:[]};
+  state.adminEditingUsername = null; state.adminRevealed = new Set();
   window.location.hash = '';
   location.reload();
+}
+async function refreshAdminAccounts(){
+  const res = await callAppsScript({action:'admin_list', adminKey: state.adminKey});
+  if(res.ok) state.adminAccounts = res.accounts;
+}
+async function refreshAdminGoogle(){
+  const res = await callAppsScript({action:'admin_google_list', adminKey: state.adminKey});
+  if(res.ok) state.adminGoogle = {approved:res.approved, pending:res.pending};
+}
+
+function renderAdminHome(){
+  const tab = state.adminTab || 'students';
+  return `
+  <div class="screen">
+    <h1 class="page-title">Trang quản trị</h1>
+    <div class="list-tools">
+      <button class="btn ${tab==='students'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('students')">Mã học viên</button>
+      <button class="btn ${tab==='google'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('google')">Đăng nhập Google</button>
+    </div>
+    ${tab==='students' ? renderAdminStudentsTab() : renderAdminGoogleTab()}
+    <button class="btn-ghost" style="margin-top:20px;" onclick="adminLogout()">Thoát khỏi trang quản trị</button>
+  </div>`;
+}
+function switchAdminTab(tab){ state.adminTab = tab; state.adminEditingUsername = null; render(); }
+
+/* ---- tab: mã học viên ---- */
+function renderAdminStudentsTab(){
+  const accs = state.adminAccounts || [];
+  const editing = state.adminEditingUsername ? accs.find(a=>a.username===state.adminEditingUsername) : null;
+  const rows = accs.map(a=>{
+    const revealed = state.adminRevealed.has(a.username);
+    return `
+    <div class="card">
+      <div class="card-row">
+        <div style="flex:1;">
+          <div class="card-title">${a.username}</div>
+          <div class="card-sub">${a.displayName || '(chưa đặt tên)'} · tạo ${a.createdAt ? new Date(a.createdAt).toLocaleDateString('vi-VN') : '—'}</div>
+          <div class="card-sub" style="margin-top:4px;">
+            Mật khẩu: ${revealed ? `<b>${a.password || '(không có)'}</b>` : '••••••••'}
+            <button class="icon-btn" style="width:26px;height:26px;font-size:12px;margin-left:6px;" onclick="toggleRevealPassword('${a.username}')" title="${revealed?'Ẩn':'Xem'}">${revealed?'🙈':'👁'}</button>
+          </div>
+        </div>
+        <div class="card-actions-row">
+          <button class="icon-btn" onclick="startEditAccount('${a.username}')" title="Sửa">✏️</button>
+          <button class="icon-btn icon-btn-danger" onclick="confirmDeleteAccount('${a.username}')" title="Xoá">🗑️</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('') || `<div class="empty-state">Chưa có tài khoản học viên nào</div>`;
+
+  return `
+    <p class="page-sub">${editing ? 'Sửa thông tin tài khoản — để trống mật khẩu nếu không muốn đổi.' : 'Điền thông tin rồi bấm tạo — hệ thống tự tạo 1 Google Sheet dữ liệu riêng cho học viên đó.'}</p>
+    <div class="card">
+      <label style="margin-top:0;">Mã học viên</label>
+      <input type="text" id="a_username" placeholder="VD: HV2026-015" value="${editing?editing.username:''}" ${editing?'disabled style="background:var(--cream-deep);"':''}>
+      <label>${editing?'Mật khẩu mới (bỏ trống nếu giữ nguyên)':'Mật khẩu tạm'}</label>
+      <input type="text" id="a_password" placeholder="${editing?'••••••••':'VD: trada2026'}" value="${editing?'':''}">
+      <label>Tên học viên</label>
+      <input type="text" id="a_name" placeholder="Nguyễn Thị A" value="${editing?(editing.displayName||''):''}">
+      <div class="btn-row" style="margin-top:16px;">
+        ${editing?`<button class="btn btn-outline" onclick="cancelEditAccount()">Huỷ</button>`:''}
+        <button class="btn btn-primary" onclick="adminSaveAccount()">${editing?'Lưu thay đổi':'+ Tạo tài khoản'}</button>
+      </div>
+    </div>
+    <label>Đã tạo (${accs.length})</label>
+    ${rows}`;
+}
+function toggleRevealPassword(username){
+  if(state.adminRevealed.has(username)) state.adminRevealed.delete(username);
+  else state.adminRevealed.add(username);
+  render();
+}
+function startEditAccount(username){ state.adminEditingUsername = username; render(); }
+function cancelEditAccount(){ state.adminEditingUsername = null; render(); }
+async function adminSaveAccount(){
+  const editing = state.adminEditingUsername;
+  const password = document.getElementById('a_password').value;
+  const displayName = document.getElementById('a_name').value.trim();
+  if(editing){
+    showFullLoading('Đang lưu...');
+    try{
+      const res = await callAppsScript({action:'admin_update', adminKey: state.adminKey, username: editing, newPassword: password || undefined, newDisplayName: displayName});
+      hideFullLoading();
+      if(!res.ok){ toast('⚠️ '+(res.error||'Lưu thất bại')); return; }
+      toast('✅ Đã lưu thay đổi');
+      state.adminEditingUsername = null;
+      await refreshAdminAccounts();
+      go('adminHome');
+    }catch(e){ hideFullLoading(); toast('⚠️ Lỗi kết nối máy chủ'); }
+    return;
+  }
+  const username = document.getElementById('a_username').value.trim();
+  if(!username || !password){ toast('⚠️ Nhập đủ mã học viên và mật khẩu'); return; }
+  showFullLoading('Đang tạo tài khoản...');
+  try{
+    const res = await callAppsScript({action:'admin_create', adminKey: state.adminKey, username, password, displayName});
+    hideFullLoading();
+    if(!res.ok){ toast('⚠️ '+(res.error||'Tạo thất bại')); return; }
+    toast(`✅ Đã tạo tài khoản ${username} — gửi mã + mật khẩu cho học viên`);
+    await refreshAdminAccounts();
+    go('adminHome');
+  }catch(e){
+    hideFullLoading();
+    toast('⚠️ Lỗi kết nối máy chủ');
+  }
+}
+function confirmDeleteAccount(username){
+  if(confirm(`Xoá tài khoản "${username}"?\n\nSẽ xoá luôn Google Sheet dữ liệu riêng của học viên này (chuyển vào Thùng rác Drive). Không thể hoàn tác qua app.`)){
+    adminDeleteAccount(username);
+  }
+}
+async function adminDeleteAccount(username){
+  showFullLoading('Đang xoá...');
+  try{
+    const res = await callAppsScript({action:'admin_delete', adminKey: state.adminKey, username});
+    hideFullLoading();
+    if(!res.ok){ toast('⚠️ '+(res.error||'Xoá thất bại')); return; }
+    toast('🗑️ Đã xoá tài khoản');
+    await refreshAdminAccounts();
+    go('adminHome');
+  }catch(e){ hideFullLoading(); toast('⚠️ Lỗi kết nối máy chủ'); }
+}
+
+/* ---- tab: duyệt đăng nhập Google ---- */
+function renderAdminGoogleTab(){
+  const g = state.adminGoogle || {approved:[],pending:[]};
+  const pendingRows = g.pending.map(p=>`
+    <div class="card">
+      <div class="card-row">
+        <div>
+          <div class="card-title">${p.email}</div>
+          <div class="card-sub">Thử đăng nhập lúc ${p.lastSeenAt ? new Date(p.lastSeenAt).toLocaleString('vi-VN') : '—'}</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="adminApproveGoogle('${p.email}')">✅ Duyệt</button>
+      </div>
+    </div>`).join('') || `<div class="empty-state" style="padding:24px;">Chưa có ai đang chờ duyệt</div>`;
+  const approvedRows = g.approved.map(a=>`
+    <div class="card">
+      <div class="card-row">
+        <div>
+          <div class="card-title">${a.email}</div>
+          <div class="card-sub">${a.displayName||''} · duyệt ${a.approvedAt ? new Date(a.approvedAt).toLocaleDateString('vi-VN') : '—'}</div>
+        </div>
+        <button class="icon-btn icon-btn-danger" onclick="confirmRevokeGoogle('${a.email}')" title="Thu hồi quyền">🗑️</button>
+      </div>
+    </div>`).join('') || `<div class="empty-state" style="padding:24px;">Chưa duyệt email nào</div>`;
+
+  return `
+    <p class="page-sub">Chỉ email Google đã duyệt mới đăng nhập được vào app. Người khác bấm "Đăng nhập bằng Google" sẽ vào hàng chờ bên dưới, KHÔNG được tạo/xem dữ liệu cho tới khi bạn duyệt.</p>
+    <div class="card">
+      <label style="margin-top:0;">Duyệt trước 1 email (không cần họ thử đăng nhập trước)</label>
+      <input type="text" id="g_email" placeholder="ten@gmail.com">
+      <label>Tên (tuỳ chọn)</label>
+      <input type="text" id="g_name" placeholder="Nguyễn Thị A">
+      <button class="btn btn-primary btn-sm" style="margin-top:12px;" onclick="adminApproveGoogle(null)">✅ Duyệt email này</button>
+    </div>
+    <label>Đang chờ duyệt (${g.pending.length})</label>
+    ${pendingRows}
+    <label style="margin-top:18px;">Đã duyệt (${g.approved.length})</label>
+    ${approvedRows}`;
+}
+async function adminApproveGoogle(emailArg){
+  const email = emailArg || document.getElementById('g_email').value.trim();
+  const displayName = emailArg ? '' : document.getElementById('g_name').value.trim();
+  if(!email){ toast('⚠️ Nhập email cần duyệt'); return; }
+  showFullLoading('Đang duyệt...');
+  try{
+    const res = await callAppsScript({action:'admin_google_approve', adminKey: state.adminKey, email, displayName});
+    hideFullLoading();
+    if(!res.ok){ toast('⚠️ '+(res.error||'Duyệt thất bại')); return; }
+    toast(`✅ Đã duyệt ${email}`);
+    await refreshAdminGoogle();
+    go('adminHome');
+  }catch(e){ hideFullLoading(); toast('⚠️ Lỗi kết nối máy chủ'); }
+}
+function confirmRevokeGoogle(email){
+  if(confirm(`Thu hồi quyền truy cập của "${email}"?\n\nLưu ý: nếu người này đang có phiên còn hiệu lực trong trình duyệt, họ vẫn dùng được tới khi phiên đó hết hạn/đăng xuất.`)){
+    adminRevokeGoogle(email);
+  }
+}
+async function adminRevokeGoogle(email){
+  showFullLoading('Đang thu hồi...');
+  try{
+    const res = await callAppsScript({action:'admin_google_revoke', adminKey: state.adminKey, email});
+    hideFullLoading();
+    if(!res.ok){ toast('⚠️ '+(res.error||'Thất bại')); return; }
+    toast('✅ Đã thu hồi quyền');
+    await refreshAdminGoogle();
+    go('adminHome');
+  }catch(e){ hideFullLoading(); toast('⚠️ Lỗi kết nối máy chủ'); }
 }
 
 const IS_ADMIN_ROUTE = window.location.hash === '#admin';
