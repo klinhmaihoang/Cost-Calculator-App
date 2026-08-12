@@ -175,9 +175,9 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 const TABS = {
   Ingredients: ['id','name','group','buyUnit','packQty','baseUnit','price'],
   SemiRecipes: ['id','name','yieldQty','yieldUnit'],
-  SemiComponents: ['id','semiId','semiName','ingredientId','ingredientName','qty'],
+  SemiComponents: ['id','semiId','ingredientId','semiName','ingredientName','qty','unitPrice','unit'],
   Dishes: ['id','name','opPct','fcPct'],
-  DishComponents: ['id','dishId','dishName','type','typeLabel','refId','componentName','qty'],
+  DishComponents: ['id','dishId','refId','type','dishName','componentName','typeLabel','qty','unitPrice','unit'],
 };
 
 // Tên cột hiển thị bằng tiếng Việt — chỉ dùng để GHI dòng tiêu đề cho đẹp/dễ đọc.
@@ -187,11 +187,11 @@ const TABS = {
 const VI_HEADERS = {
   Ingredients: ['Mã','Tên nguyên liệu','Nhóm','Quy cách mua','Số lượng/quy cách','Đơn vị tính','Giá mua (VNĐ)'],
   SemiRecipes: ['Mã','Tên bán thành phẩm','Sản lượng','Đơn vị sản lượng'],
-  SemiComponents: ['Mã','Mã bán thành phẩm','Tên bán thành phẩm','Mã nguyên liệu','Tên nguyên liệu','Định mức'],
+  SemiComponents: ['Mã','Mã bán thành phẩm','Mã nguyên liệu','Tên bán thành phẩm','Tên nguyên liệu','Định mức','Đơn giá','Đơn vị tính'],
   Dishes: ['Mã','Tên món','% Chi phí vận hành','% Food cost mục tiêu'],
-  DishComponents: ['Mã','Mã món','Tên món','Loại (mã hệ thống)','Loại','Mã thành phần','Tên thành phần','Định mức'],
+  DishComponents: ['Mã','Mã món','Mã thành phần','Loại (mã hệ thống)','Tên món','Tên thành phần','Loại','Định mức','Đơn giá','Đơn vị tính'],
 };
-const CURRENCY_COLS = { Ingredients: [7] };  // cột "Giá mua"
+const CURRENCY_COLS = { Ingredients: [7], SemiComponents: [7], DishComponents: [9] };  // cột "Giá mua" / "Đơn giá"
 const PERCENT_COLS = { Dishes: [3, 4] };      // cột % chi phí vận hành / % food cost
 const TAB_TITLES = {
   Ingredients: 'Nguyên liệu',
@@ -223,17 +223,19 @@ function stateToTabs(){
   return {
     Ingredients: state.ingredients.map(i=>({id:i.id,name:i.name,group:i.group,buyUnit:i.buyUnit,packQty:i.packQty,baseUnit:i.baseUnit,price:i.price})),
     SemiRecipes: state.semiRecipes.map(s=>({id:s.id,name:s.name,yieldQty:s.yieldQty,yieldUnit:s.yieldUnit})),
-    SemiComponents: state.semiRecipes.flatMap(s=>s.components.map((c,idx)=>({
-      id:s.id+'_c'+idx, semiId:s.id, semiName:s.name,
-      ingredientId:c.ingredientId, ingredientName:(findIngredient(c.ingredientId)||{}).name||'(đã xoá)',
-      qty:c.qty
-    }))),
+    SemiComponents: state.semiRecipes.flatMap(s=>s.components.map((c,idx)=>{
+      const ing = findIngredient(c.ingredientId);
+      return {
+        id:s.id+'_c'+idx, semiId:s.id, ingredientId:c.ingredientId,
+        semiName:s.name, ingredientName: ing?ing.name:'(đã xoá)',
+        qty:c.qty, unitPrice: ing?ingredientUnitPrice(ing):0, unit: ing?ing.baseUnit:''
+      };
+    })),
     Dishes: state.dishes.map(d=>({id:d.id,name:d.name,opPct:d.opPct,fcPct:d.fcPct})),
     DishComponents: state.dishes.flatMap(d=>d.components.map((c,idx)=>({
-      id:d.id+'_c'+idx, dishId:d.id, dishName:d.name,
-      type:c.type, typeLabel: c.type==='semi' ? 'Bán thành phẩm' : 'Nguyên liệu thô',
-      refId:c.refId, componentName: componentName(c),
-      qty:c.qty
+      id:d.id+'_c'+idx, dishId:d.id, refId:c.refId, type:c.type,
+      dishName:d.name, componentName: componentName(c), typeLabel: c.type==='semi' ? 'Bán thành phẩm' : 'Nguyên liệu thô',
+      qty:c.qty, unitPrice: componentUnitPrice(c), unit: componentUnit(c)
     }))),
   };
 }
@@ -581,11 +583,13 @@ const GROUP_COLORS = {
   "Khác": "#9A8F7A"
 };
 
-// ID duy nhất thật sự (không dùng bộ đếm — bộ đếm sẽ reset mỗi lần tải lại
-// trang và có thể tạo ra ID trùng với dữ liệu đã lưu trước đó từ phiên khác).
-const nextId = () => {
-  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
-  return 'id' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+// ID ngắn gọn, có tiền tố theo loại cho dễ nhận biết (NL/BTP/MON), vẫn đủ duy nhất
+// vì kết hợp thời gian + số ngẫu nhiên — không dùng bộ đếm (bộ đếm sẽ reset mỗi lần
+// tải lại trang và có thể tạo ra ID trùng với dữ liệu đã lưu trước đó từ phiên khác).
+const nextId = (prefix) => {
+  const time = Date.now().toString(36).slice(-3).toUpperCase();
+  const rand = Math.random().toString(36).slice(2, 5).toUpperCase();
+  return (prefix ? prefix + '-' : '') + time + rand;
 };
 
 const state = {
@@ -1006,7 +1010,7 @@ function saveIngredient(){
     Object.assign(findIngredient(state.editIngredientId), payload);
     toast('✅ Đã lưu thay đổi');
   } else {
-    state.ingredients.push({id: nextId(), ...payload});
+    state.ingredients.push({id: nextId('NL'), ...payload});
     toast('✅ Đã lưu nguyên liệu');
   }
   state.editIngredientId = null;
@@ -1213,7 +1217,7 @@ function saveSemi(){
     Object.assign(findSemi(w.editingId), {name:w.name, components:w.components, yieldQty:w.yieldQty, yieldUnit:w.yieldUnit});
     toast('✅ Đã lưu thay đổi công thức nền');
   } else {
-    state.semiRecipes.push({id: nextId(), name:w.name, components:w.components, yieldQty:w.yieldQty, yieldUnit:w.yieldUnit});
+    state.semiRecipes.push({id: nextId('BTP'), name:w.name, components:w.components, yieldQty:w.yieldQty, yieldUnit:w.yieldUnit});
     toast('✅ Đã lưu công thức nền');
   }
   syncToCloud();
@@ -1350,7 +1354,7 @@ function saveDish(){
     Object.assign(d, {name:w.name, components:w.components, opPct:w.opPct, fcPct:w.fcPct});
     toast('✅ Đã lưu thay đổi món');
   } else {
-    state.dishes.push({id: nextId(), name:w.name, components:w.components, opPct:w.opPct, fcPct:w.fcPct});
+    state.dishes.push({id: nextId('MON'), name:w.name, components:w.components, opPct:w.opPct, fcPct:w.fcPct});
     toast('✅ Đã lưu món');
   }
   syncToCloud();
