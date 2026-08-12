@@ -180,6 +180,20 @@ const TABS = {
   DishComponents: ['id','dishId','type','refId','qty'],
 };
 
+// Tên cột hiển thị bằng tiếng Việt — chỉ dùng để GHI dòng tiêu đề cho đẹp/dễ đọc.
+// Đọc/ghi dữ liệu thật luôn dựa theo THỨ TỰ CỘT trong TABS (không dựa vào chữ hiển
+// thị), nên đổi chữ ở đây không bao giờ làm hỏng dữ liệu — kể cả Sheet cũ đã tạo
+// trước khi có bản cập nhật này cũng tự nâng cấp ở lần đồng bộ tiếp theo.
+const VI_HEADERS = {
+  Ingredients: ['Mã','Tên nguyên liệu','Nhóm','Quy cách mua','Số lượng/quy cách','Đơn vị tính','Giá mua (VNĐ)'],
+  SemiRecipes: ['Mã','Tên bán thành phẩm','Sản lượng','Đơn vị sản lượng'],
+  SemiComponents: ['Mã','Mã bán thành phẩm','Mã nguyên liệu','Định mức'],
+  Dishes: ['Mã','Tên món','% Chi phí vận hành','% Food cost mục tiêu'],
+  DishComponents: ['Mã','Mã món','Loại','Mã thành phần','Định mức'],
+};
+const CURRENCY_COLS = { Ingredients: [7] };  // cột "Giá mua"
+const PERCENT_COLS = { Dishes: [3, 4] };      // cột % chi phí vận hành / % food cost
+
 let accessToken = null;   // token OAuth của học viên đăng nhập Google
 let tokenClient = null;
 
@@ -298,14 +312,16 @@ async function writeAllTabs(sheetId, dataByTab){
     body: JSON.stringify({ranges: clearRanges})
   });
   const data = Object.keys(TABS).map(tab=>{
-    const headers = TABS[tab];
-    const rows = (dataByTab[tab]||[]).map(obj=>headers.map(h=> obj[h]===undefined?'':obj[h]));
+    const keys = TABS[tab];
+    const headers = VI_HEADERS[tab] || keys;
+    const rows = (dataByTab[tab]||[]).map(obj=>keys.map(k=> obj[k]===undefined?'':obj[k]));
     return {range: `${tab}!A1`, values:[headers, ...rows]};
   });
   await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`, {
     method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
     body: JSON.stringify({valueInputOption:'RAW', data})
   });
+  try{ await applySheetStyling(sheetId); }catch(e){ console.error('style error', e); } // không chặn lưu nếu style lỗi
 }
 async function readAllTabs(sheetId){
   const rangeParams = Object.keys(TABS).map(t=>`ranges=${encodeURIComponent(t+'!A1:Z')}`).join('&');
@@ -314,10 +330,58 @@ async function readAllTabs(sheetId){
   const out = {};
   Object.keys(TABS).forEach((tab,i)=>{
     const values = (json.valueRanges[i] && json.valueRanges[i].values) || [];
-    const headers = values[0] || TABS[tab];
-    out[tab] = values.slice(1).map(r=>{ const o={}; headers.forEach((h,idx)=>o[h]=r[idx]); return o; });
+    const keys = TABS[tab]; // đọc theo THỨ TỰ CỘT cố định, không phụ thuộc chữ ở dòng tiêu đề
+    out[tab] = values.slice(1).map(r=>{ const o={}; keys.forEach((k,idx)=>o[k]=r[idx]); return o; });
   });
   return out;
+}
+
+/* ---- style Sheet: header tô màu, đóng băng dòng 1, định dạng tiền/% ---- */
+async function getSheetIdMap(spreadsheetId){
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`, {headers:{Authorization:'Bearer '+accessToken}});
+  const json = await res.json();
+  const map = {};
+  (json.sheets||[]).forEach(s=>{ map[s.properties.title] = s.properties.sheetId; });
+  return map;
+}
+function buildStyleRequests(sheetIdMap){
+  const requests = [];
+  Object.keys(TABS).forEach(tab=>{
+    const sid = sheetIdMap[tab];
+    if(sid===undefined) return;
+    const headers = VI_HEADERS[tab] || TABS[tab];
+    requests.push({updateSheetProperties:{properties:{sheetId:sid, gridProperties:{frozenRowCount:1}}, fields:'gridProperties.frozenRowCount'}});
+    requests.push({repeatCell:{
+      range:{sheetId:sid, startRowIndex:0, endRowIndex:1, startColumnIndex:0, endColumnIndex:headers.length},
+      cell:{userEnteredFormat:{backgroundColor:{red:0.941,green:0.639,blue:0.098}, textFormat:{bold:true, foregroundColor:{red:0.165,green:0.114,blue:0.008}}, horizontalAlignment:'CENTER'}},
+      fields:'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+    }});
+    requests.push({updateDimensionProperties:{range:{sheetId:sid, dimension:'COLUMNS', startIndex:0, endIndex:headers.length}, properties:{pixelSize:160}, fields:'pixelSize'}});
+    (CURRENCY_COLS[tab]||[]).forEach(c=>{
+      requests.push({repeatCell:{
+        range:{sheetId:sid, startRowIndex:1, endRowIndex:2000, startColumnIndex:c-1, endColumnIndex:c},
+        cell:{userEnteredFormat:{numberFormat:{type:'CURRENCY', pattern:'#,##0" đ"'}}},
+        fields:'userEnteredFormat.numberFormat'
+      }});
+    });
+    (PERCENT_COLS[tab]||[]).forEach(c=>{
+      requests.push({repeatCell:{
+        range:{sheetId:sid, startRowIndex:1, endRowIndex:2000, startColumnIndex:c-1, endColumnIndex:c},
+        cell:{userEnteredFormat:{numberFormat:{type:'PERCENT', pattern:'0.0%'}}},
+        fields:'userEnteredFormat.numberFormat'
+      }});
+    });
+  });
+  return requests;
+}
+async function applySheetStyling(spreadsheetId){
+  const sheetIdMap = await getSheetIdMap(spreadsheetId);
+  const requests = buildStyleRequests(sheetIdMap);
+  if(!requests.length) return;
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+    method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
+    body: JSON.stringify({requests})
+  });
 }
 async function afterGoogleLogin(){
   showFullLoading('Đang kiểm tra tài khoản...');
