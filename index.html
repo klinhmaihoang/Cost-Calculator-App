@@ -868,15 +868,15 @@ function renderIngredientForm(){
       </div>
       <div>
         <label>Đơn vị tính</label>
-        <select id="f_baseUnit">
-          <option value="g" ${editing&&editing.baseUnit==='g'?'selected':''}>gram (g)</option>
-          <option value="ml" ${editing&&editing.baseUnit==='ml'?'selected':''}>ml</option>
-          <option value="cái" ${editing&&editing.baseUnit==='cái'?'selected':''}>cái</option>
-        </select>
+        <input type="text" id="f_baseUnit" list="unitOptions" value="${editing?editing.baseUnit:'g'}" placeholder="g, ml, cái, kg, lít...">
+        <datalist id="unitOptions">
+          <option value="g"><option value="kg"><option value="ml"><option value="lít">
+          <option value="cái"><option value="quả"><option value="lát"><option value="gói">
+        </datalist>
       </div>
     </div>
     <label>Giá mua (VNĐ)</label>
-    <input type="number" id="f_price" value="${editing?editing.price:''}" placeholder="90000">
+    <input type="number" id="f_price" value="${editing?editing.price:''}" placeholder="90000 (nhập 0 nếu miễn phí, VD nước máy)">
     <button class="btn btn-primary" style="margin-top:22px;" onclick="saveIngredient()">${editing?'Lưu thay đổi':'Lưu nguyên liệu'}</button>
     ${editing?`<button class="btn btn-danger" style="margin-top:10px;" onclick="confirmDeleteIngredient('${editing.id}')">Xoá nguyên liệu này</button>`:''}
   </div>`;
@@ -884,13 +884,15 @@ function renderIngredientForm(){
 function saveIngredient(){
   const name = document.getElementById('f_name').value.trim();
   const packQty = parseFloat(document.getElementById('f_packQty').value);
-  const price = parseFloat(document.getElementById('f_price').value);
-  if(!name || !packQty || !price){ toast('⚠️ Vui lòng nhập đủ thông tin'); return; }
+  const priceRaw = document.getElementById('f_price').value;
+  const price = parseFloat(priceRaw);
+  const baseUnit = document.getElementById('f_baseUnit').value.trim();
+  if(!name || !packQty || !baseUnit || priceRaw===''|| isNaN(price)){ toast('⚠️ Vui lòng nhập đủ thông tin'); return; }
   const payload = {
     name,
     group: document.getElementById('f_group').value,
     buyUnit: document.getElementById('f_buyUnit').value || '—',
-    packQty, baseUnit: document.getElementById('f_baseUnit').value, price
+    packQty, baseUnit, price
   };
   if(state.editIngredientId){
     Object.assign(findIngredient(state.editIngredientId), payload);
