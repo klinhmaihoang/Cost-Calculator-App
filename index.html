@@ -193,6 +193,13 @@ const VI_HEADERS = {
 };
 const CURRENCY_COLS = { Ingredients: [7] };  // cột "Giá mua"
 const PERCENT_COLS = { Dishes: [3, 4] };      // cột % chi phí vận hành / % food cost
+const TAB_TITLES = {
+  Ingredients: 'Nguyên liệu',
+  SemiRecipes: 'Công thức nền',
+  SemiComponents: 'Chi tiết công thức nền',
+  Dishes: 'Món',
+  DishComponents: 'Chi tiết món',
+};
 
 let accessToken = null;   // token OAuth của học viên đăng nhập Google
 let tokenClient = null;
@@ -289,7 +296,7 @@ async function findAppSpreadsheet(){
   return (json.files && json.files[0]) ? json.files[0].id : null;
 }
 async function createAppSpreadsheet(){
-  const body = { properties:{title:'CostApp - Dữ liệu của tôi'}, sheets: Object.keys(TABS).map(name=>({properties:{title:name}})) };
+  const body = { properties:{title:'CostApp - Dữ liệu của tôi'}, sheets: Object.keys(TABS).map(key=>({properties:{title:TAB_TITLES[key]}})) };
   const res = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
     method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'}, body:JSON.stringify(body)
   });
@@ -302,11 +309,31 @@ async function createAppSpreadsheet(){
   });
   return sheetId;
 }
+async function ensureTabTitles(spreadsheetId){
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`, {headers:{Authorization:'Bearer '+accessToken}});
+  const json = await res.json();
+  const byTitle = {};
+  (json.sheets||[]).forEach(s=>{ byTitle[s.properties.title] = s.properties.sheetId; });
+  const requests = [];
+  Object.keys(TABS).forEach(key=>{
+    const niceName = TAB_TITLES[key];
+    if(byTitle[niceName] !== undefined) return; // đã đúng tên mới
+    const sid = byTitle[key]; // Sheet cũ còn tên tiếng Anh
+    if(sid !== undefined) requests.push({updateSheetProperties:{properties:{sheetId:sid, title:niceName}, fields:'title'}});
+  });
+  if(requests.length){
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+      method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
+      body: JSON.stringify({requests})
+    });
+  }
+}
 async function writeAllTabs(sheetId, dataByTab){
+  await ensureTabTitles(sheetId); // tự đổi tên tab cũ (tiếng Anh) sang tiếng Việt nếu cần
   // Xoá sạch từng tab trước khi ghi lại — nếu không, các dòng cũ (VD nguyên liệu
   // vừa bị xoá trong app) sẽ vẫn còn sót lại trên Sheet thật vì batchUpdate chỉ
   // ghi đè đúng số dòng của dữ liệu mới, không tự dọn phần thừa bên dưới.
-  const clearRanges = Object.keys(TABS).map(t=>`${t}!A1:Z10000`);
+  const clearRanges = Object.keys(TABS).map(t=>`${TAB_TITLES[t]}!A1:Z10000`);
   await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchClear`, {
     method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
     body: JSON.stringify({ranges: clearRanges})
@@ -315,7 +342,7 @@ async function writeAllTabs(sheetId, dataByTab){
     const keys = TABS[tab];
     const headers = VI_HEADERS[tab] || keys;
     const rows = (dataByTab[tab]||[]).map(obj=>keys.map(k=> obj[k]===undefined?'':obj[k]));
-    return {range: `${tab}!A1`, values:[headers, ...rows]};
+    return {range: `${TAB_TITLES[tab]}!A1`, values:[headers, ...rows]};
   });
   await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`, {
     method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
@@ -324,7 +351,8 @@ async function writeAllTabs(sheetId, dataByTab){
   try{ await applySheetStyling(sheetId); }catch(e){ console.error('style error', e); } // không chặn lưu nếu style lỗi
 }
 async function readAllTabs(sheetId){
-  const rangeParams = Object.keys(TABS).map(t=>`ranges=${encodeURIComponent(t+'!A1:Z')}`).join('&');
+  await ensureTabTitles(sheetId); // tự đổi tên tab cũ nếu cần, trước khi đọc theo tên mới
+  const rangeParams = Object.keys(TABS).map(t=>`ranges=${encodeURIComponent(TAB_TITLES[t]+'!A1:Z')}`).join('&');
   const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchGet?${rangeParams}`, {headers:{Authorization:'Bearer '+accessToken}});
   const json = await res.json();
   const out = {};
@@ -347,7 +375,7 @@ async function getSheetIdMap(spreadsheetId){
 function buildStyleRequests(sheetIdMap){
   const requests = [];
   Object.keys(TABS).forEach(tab=>{
-    const sid = sheetIdMap[tab];
+    const sid = sheetIdMap[TAB_TITLES[tab]];
     if(sid===undefined) return;
     const headers = VI_HEADERS[tab] || TABS[tab];
     requests.push({updateSheetProperties:{properties:{sheetId:sid, gridProperties:{frozenRowCount:1}}, fields:'gridProperties.frozenRowCount'}});
@@ -416,7 +444,10 @@ async function afterGoogleLogin(){
     let isNew = false;
     if(!sheetId){ sheetId = await createAppSpreadsheet(); isNew = true; }
     state.user = {name: email || 'Học viên (Google)', method:'google', sheetId};
-    if(!isNew){ tabsToState(await readAllTabs(sheetId)); }
+    if(!isNew){
+      tabsToState(await readAllTabs(sheetId)); // đã tự đổi tên tab cũ nếu cần
+      try{ await applySheetStyling(sheetId); }catch(e){ console.error('style error', e); } // làm mới màu/định dạng ngay cả khi chỉ đăng nhập, không cần sửa gì
+    }
     saveSessionCache();
     hideFullLoading();
     toast(isNew ? '✅ Đã tạo Sheet dữ liệu trong Drive của bạn' : '✅ Đã tải dữ liệu từ Sheet của bạn');
