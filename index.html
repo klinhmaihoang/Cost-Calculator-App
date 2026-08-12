@@ -477,8 +477,12 @@ const GROUP_COLORS = {
   "Khác": "#9A8F7A"
 };
 
-let uid = 100;
-const nextId = () => (++uid).toString();
+// ID duy nhất thật sự (không dùng bộ đếm — bộ đếm sẽ reset mỗi lần tải lại
+// trang và có thể tạo ra ID trùng với dữ liệu đã lưu trước đó từ phiên khác).
+const nextId = () => {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'id' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+};
 
 const state = {
   screen: 'login',
