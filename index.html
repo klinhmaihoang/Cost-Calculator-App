@@ -176,7 +176,7 @@ const TABS = {
   Ingredients: ['id','name','group','buyUnit','packQty','baseUnit','price'],
   SemiRecipes: ['id','name','yieldQty','yieldUnit'],
   SemiComponents: ['id','semiId','ingredientId','semiName','ingredientName','qty','unitPrice','unit'],
-  Dishes: ['id','name','opPct','fcPct'],
+  Dishes: ['id','name','opPct','fcPct','cost','suggestedPrice','actualFcPct'],
   DishComponents: ['id','dishId','refId','type','dishName','componentName','typeLabel','qty','unitPrice','unit'],
 };
 
@@ -188,11 +188,11 @@ const VI_HEADERS = {
   Ingredients: ['Mã','Tên nguyên liệu','Nhóm','Quy cách mua','Số lượng/quy cách','Đơn vị tính','Giá mua (VNĐ)'],
   SemiRecipes: ['Mã','Tên bán thành phẩm','Sản lượng','Đơn vị sản lượng'],
   SemiComponents: ['Mã','Mã bán thành phẩm','Mã nguyên liệu','Tên bán thành phẩm','Tên nguyên liệu','Định mức','Đơn giá','Đơn vị tính'],
-  Dishes: ['Mã','Tên món','% Chi phí vận hành','% Food cost mục tiêu'],
+  Dishes: ['Mã','Tên món','% Chi phí vận hành','% Food cost mục tiêu','Chi phí nguyên liệu','Giá bán đề xuất','% Food cost thực tế'],
   DishComponents: ['Mã','Mã món','Mã thành phần','Loại (mã hệ thống)','Tên món','Tên thành phần','Loại','Định mức','Đơn giá','Đơn vị tính'],
 };
-const CURRENCY_COLS = { Ingredients: [7], SemiComponents: [7], DishComponents: [9] };  // cột "Giá mua" / "Đơn giá"
-const PERCENT_COLS = { Dishes: [3, 4] };      // cột % chi phí vận hành / % food cost
+const CURRENCY_COLS = { Ingredients: [7], SemiComponents: [7], DishComponents: [9], Dishes: [5, 6] };
+const PERCENT_COLS = { Dishes: [3, 4, 7] };
 const TAB_TITLES = {
   Ingredients: 'Nguyên liệu',
   SemiRecipes: 'Công thức nền',
@@ -231,7 +231,10 @@ function stateToTabs(){
         qty:c.qty, unitPrice: ing?ingredientUnitPrice(ing):0, unit: ing?ing.baseUnit:''
       };
     })),
-    Dishes: state.dishes.map(d=>({id:d.id,name:d.name,opPct:d.opPct,fcPct:d.fcPct})),
+    Dishes: state.dishes.map(d=>({
+      id:d.id, name:d.name, opPct:d.opPct, fcPct:d.fcPct,
+      cost: dishCost(d), suggestedPrice: suggestedPrice(d), actualFcPct: actualFoodCostPct(d)
+    })),
     DishComponents: state.dishes.flatMap(d=>d.components.map((c,idx)=>({
       id:d.id+'_c'+idx, dishId:d.id, refId:c.refId, type:c.type,
       dishName:d.name, componentName: componentName(c), typeLabel: c.type==='semi' ? 'Bán thành phẩm' : 'Nguyên liệu thô',
@@ -899,8 +902,34 @@ function renderIngredients(){
       ${sel ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteAllIngredients()">🗑️ Xoá tất cả</button>`}
     </div>
     ${rows}
+    <button class="btn-ghost" style="margin-top:14px;font-size:13px;" onclick="confirmShortenAllIds()">🔧 Rút gọn toàn bộ mã cũ (nguyên liệu, công thức nền, món)</button>
   </div>
   ${selectBar('ingredients', state.ingredients.map(i=>i.id))}`;
+}
+
+function confirmShortenAllIds(){
+  const msg = 'Rút gọn toàn bộ mã hiện có (nguyên liệu, công thức nền, món) sang dạng ngắn (VD: NL-9FQ2A1)?\n\nKhông mất dữ liệu — chỉ đổi cách đặt mã, mọi liên kết (công thức nền dùng nguyên liệu nào, món dùng thành phần nào) sẽ tự cập nhật theo. Nên làm 1 lần rồi thôi.';
+  if(confirm(msg)) shortenAllIds();
+}
+function shortenAllIds(){
+  const idMap = {};
+  state.ingredients.forEach(i=>{ idMap[i.id] = nextId('NL'); });
+  state.semiRecipes.forEach(s=>{ idMap[s.id] = nextId('BTP'); });
+  state.dishes.forEach(d=>{ idMap[d.id] = nextId('MON'); });
+
+  state.ingredients.forEach(i=>{ i.id = idMap[i.id]; });
+  state.semiRecipes.forEach(s=>{
+    s.id = idMap[s.id];
+    s.components.forEach(c=>{ if(idMap[c.ingredientId]) c.ingredientId = idMap[c.ingredientId]; });
+  });
+  state.dishes.forEach(d=>{
+    d.id = idMap[d.id];
+    d.components.forEach(c=>{ if(idMap[c.refId]) c.refId = idMap[c.refId]; });
+  });
+
+  toast('✅ Đã rút gọn toàn bộ mã');
+  syncToCloud();
+  go('ingredients');
 }
 
 function editIngredient(id){ state.editIngredientId = id; go('ingredientForm'); }
