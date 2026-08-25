@@ -178,7 +178,7 @@ const TABS = {
   SemiComponents: ['id','semiId','ingredientId','semiName','ingredientName','qty','unitPrice','unit'],
   Dishes: ['id','name','opPct','fcPct','cost','suggestedPrice','actualFcPct'],
   DishComponents: ['id','dishId','refId','type','dishName','componentName','typeLabel','qty','unitPrice','unit'],
-  DraftRecipes: ['id','name','notes','createdAt'],
+  DraftRecipes: ['id','name','ingredientsText','stepsText','createdAt'],
 };
 
 // Tên cột hiển thị bằng tiếng Việt — chỉ dùng để GHI dòng tiêu đề cho đẹp/dễ đọc.
@@ -191,7 +191,7 @@ const VI_HEADERS = {
   SemiComponents: ['Mã','Mã bán thành phẩm','Mã nguyên liệu','Tên bán thành phẩm','Tên nguyên liệu','Định mức','Đơn giá','Đơn vị tính'],
   Dishes: ['Mã','Tên món','% Chi phí vận hành','% Food cost mục tiêu','Chi phí nguyên liệu','Giá bán đề xuất','% Food cost thực tế'],
   DishComponents: ['Mã','Mã món','Mã thành phần','Loại (mã hệ thống)','Tên món','Tên thành phần','Loại','Định mức','Đơn giá','Đơn vị tính'],
-  DraftRecipes: ['Mã','Tên món/công thức','Ghi chú công thức','Ngày tạo'],
+  DraftRecipes: ['Mã','Tên món/công thức','Nguyên liệu / Công thức','Cách làm','Ngày tạo'],
 };
 const CURRENCY_COLS = { Ingredients: [7], SemiComponents: [7], DishComponents: [9], Dishes: [5, 6] };
 const PERCENT_COLS = { Dishes: [3, 4, 7] };
@@ -243,7 +243,7 @@ function stateToTabs(){
       dishName:d.name, componentName: componentName(c), typeLabel: c.type==='semi' ? 'Bán thành phẩm' : 'Nguyên liệu thô',
       qty:c.qty, unitPrice: componentUnitPrice(c), unit: componentUnit(c)
     }))),
-    DraftRecipes: state.draftRecipes.map(r=>({id:r.id, name:r.name, notes:r.notes, createdAt:r.createdAt})),
+    DraftRecipes: state.draftRecipes.map(r=>({id:r.id, name:r.name, ingredientsText:r.ingredientsText, stepsText:r.stepsText, createdAt:r.createdAt})),
   };
 }
 function tabsToState(tabs){
@@ -254,7 +254,7 @@ function tabsToState(tabs){
   const dishComps = {};
   (tabs.DishComponents||[]).forEach(r=>{ (dishComps[r.dishId] = dishComps[r.dishId]||[]).push({type:r.type, refId:String(r.refId), qty:Number(r.qty)}); });
   state.dishes = (tabs.Dishes||[]).map(r=>({id:String(r.id), name:r.name, opPct:Number(r.opPct), fcPct:Number(r.fcPct), components: dishComps[r.id]||[]}));
-  state.draftRecipes = (tabs.DraftRecipes||[]).map(r=>({id:String(r.id), name:r.name, notes:r.notes||'', createdAt:r.createdAt||''}));
+  state.draftRecipes = (tabs.DraftRecipes||[]).map(r=>({id:String(r.id), name:r.name, ingredientsText:r.ingredientsText||'', stepsText:r.stepsText||'', createdAt:r.createdAt||''}));
 }
 
 /* ---- lưu phiên đăng nhập để khỏi phải đăng nhập lại mỗi khi tải lại trang ----
@@ -630,6 +630,7 @@ const state = {
   editIngredientId: null,
   draftRecipes: [],
   editDraftId: null,
+  matchReview: null,
   selectMode: { ingredients:false, semi:false, dishes:false, drafts:false },
   selected: { ingredients:new Set(), semi:new Set(), dishes:new Set(), drafts:new Set() },
   adminKey: null,
@@ -794,6 +795,7 @@ function renderScreenBody(){
     case 'dishDetail': return renderDishDetail();
     case 'draftList': return renderDraftList();
     case 'draftForm': return renderDraftForm();
+    case 'draftMatchReview': return renderDraftMatchReview();
     default: return '';
   }
 }
@@ -1553,14 +1555,14 @@ function attachHandlers(){
 function renderDraftList(){
   const sel = state.selectMode.drafts;
   const rows = state.draftRecipes.map(r=>{
-    const preview = (r.notes||'').slice(0,140);
+    const preview = (r.ingredientsText||'').slice(0,140);
     return `
     <div class="card">
       <div class="card-row">
         ${sel?`<input type="checkbox" class="select-check" ${state.selected.drafts.has(r.id)?'checked':''} onchange="toggleSelectItem('drafts','${r.id}')">`:''}
         <div style="flex:1;">
           <div class="card-title">${r.name}</div>
-          <div class="card-sub" style="white-space:pre-wrap;">${preview}${(r.notes||'').length>140?'…':''}</div>
+          <div class="card-sub" style="white-space:pre-wrap;">${preview}${(r.ingredientsText||'').length>140?'…':''}</div>
         </div>
         ${sel?'':`
         <div class="card-actions-row">
@@ -1593,14 +1595,24 @@ function renderDraftForm(){
     <h1 class="page-title">${editing?'Sửa công thức thử nghiệm':'Công thức thử nghiệm mới'}</h1>
     <label>Tên món/công thức</label>
     <input type="text" id="dr_name" value="${editing?editing.name:''}" placeholder="VD: Trà đào cam sả (đang thử tỉ lệ)">
-    <label>Ghi chú công thức</label>
-    <textarea id="dr_notes" placeholder="Ghi tự do: nguyên liệu, tỉ lệ, cách làm, lưu ý...
-VD:
+
+    <label>Nguyên liệu / Công thức</label>
+    <div class="hint" style="margin-bottom:6px;">Liệt kê nguyên liệu và định lượng — sau này nhìn vào đây để thêm vào wizard tính cost cho nhanh.</div>
+    <textarea id="dr_ingredients" placeholder="VD:
 - Trà đen 8g
 - Đào ngâm 30g
 - Cam tươi 1/4 quả
 - Sả đập dập 1 nhánh
-- Ủ 5 phút, lắc đều với đá, nếm lại thấy hơi chua cần giảm cam" style="width:100%;min-height:240px;padding:14px;border:2px solid var(--line);border-radius:12px;font-size:15px;font-family:var(--sans);resize:vertical;">${editing?editing.notes:''}</textarea>
+- Đá 150g" style="width:100%;min-height:140px;padding:14px;border:2px solid var(--line);border-radius:12px;font-size:15px;font-family:var(--sans);resize:vertical;">${editing?editing.ingredientsText:''}</textarea>
+
+    <label>Cách làm</label>
+    <div class="hint" style="margin-bottom:6px;">Các bước pha chế, thứ tự cho nguyên liệu, lưu ý khi làm.</div>
+    <textarea id="dr_steps" placeholder="VD:
+1. Pha trà đen với nước sôi, ủ 5 phút, để nguội
+2. Cho đào ngâm, cam, sả vào ly
+3. Đổ trà vào, thêm đá
+4. Nếm lại thấy hơi chua, lần sau giảm cam xuống 1/6 quả" style="width:100%;min-height:140px;padding:14px;border:2px solid var(--line);border-radius:12px;font-size:15px;font-family:var(--sans);resize:vertical;">${editing?editing.stepsText:''}</textarea>
+
     <button class="btn btn-primary" style="margin-top:22px;" onclick="saveDraftRecipe()">${editing?'Lưu thay đổi':'Lưu công thức'}</button>
     ${editing?`<button class="btn btn-danger" style="margin-top:10px;" onclick="confirmDeleteDraft('${editing.id}')">Xoá công thức này</button>`:''}
   </div>`;
@@ -1608,13 +1620,14 @@ VD:
 function editDraftRecipe(id){ state.editDraftId = id; go('draftForm'); }
 function saveDraftRecipe(){
   const name = document.getElementById('dr_name').value.trim();
-  const notes = document.getElementById('dr_notes').value;
+  const ingredientsText = document.getElementById('dr_ingredients').value;
+  const stepsText = document.getElementById('dr_steps').value;
   if(!name){ toast('⚠️ Nhập tên món/công thức'); return; }
   if(state.editDraftId){
-    Object.assign(state.draftRecipes.find(x=>x.id===state.editDraftId), {name, notes});
+    Object.assign(state.draftRecipes.find(x=>x.id===state.editDraftId), {name, ingredientsText, stepsText});
     toast('✅ Đã lưu thay đổi');
   } else {
-    state.draftRecipes.push({id: nextId('DR'), name, notes, createdAt: new Date().toISOString()});
+    state.draftRecipes.push({id: nextId('DR'), name, ingredientsText, stepsText, createdAt: new Date().toISOString()});
     toast('✅ Đã lưu công thức thử nghiệm');
   }
   state.editDraftId = null;
@@ -1650,11 +1663,142 @@ function deleteAllDrafts(){
   syncToCloud();
   go('draftList');
 }
+/* ---- gợi ý khớp tên: đọc từng dòng "Nguyên liệu / Công thức", tách tên + định
+   mức, so khớp gần đúng với nguyên liệu/công thức nền đã có ---- */
+function stripDiacritics(str){
+  return String(str||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D');
+}
+function levenshtein(a,b){
+  const m=a.length, n=b.length;
+  const dp = [];
+  for(let i=0;i<=m;i++){ dp.push([i]); }
+  for(let j=1;j<=n;j++){ dp[0][j]=j; }
+  for(let i=1;i<=m;i++){
+    for(let j=1;j<=n;j++){
+      dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1] : 1+Math.min(dp[i-1][j-1],dp[i-1][j],dp[i][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+function rawSimilarity(a,b){
+  a=String(a||'').toLowerCase().trim(); b=String(b||'').toLowerCase().trim();
+  if(!a||!b) return 0;
+  if(a===b) return 1;
+  if(a.includes(b)||b.includes(a)) return 0.85 + 0.15*(Math.min(a.length,b.length)/Math.max(a.length,b.length));
+  const dist = levenshtein(a,b);
+  return Math.max(0, 1 - dist/Math.max(a.length,b.length));
+}
+function textSimilarity(a,b){
+  return Math.max(rawSimilarity(a,b), rawSimilarity(stripDiacritics(a), stripDiacritics(b)));
+}
+function parseIngredientLine(line){
+  let text = String(line).replace(/^[\s\-\*•\u2022\d]+[\.\)]?\s*/,'').trim(); // bỏ gạch đầu dòng / số thứ tự
+  const m = text.match(/^(.*?)[\s,]+(\d+(?:[.,]\d+)?(?:\s*\/\s*\d+)?)\s*(\p{L}+)?\s*$/u);
+  let name = text, qty = null, unit = '';
+  if(m && m[1].trim()){
+    name = m[1].trim();
+    let qtyStr = m[2].replace(/\s+/g,'');
+    if(qtyStr.includes('/')){
+      const [a,b] = qtyStr.split('/').map(Number);
+      qty = b ? +(a/b).toFixed(3) : null;
+    } else {
+      qty = parseFloat(qtyStr.replace(',','.'));
+    }
+    unit = (m[3]||'').trim();
+  }
+  return { raw: line, name: name || text, qty, unit };
+}
+function matchCandidates(){
+  return [
+    ...state.semiRecipes.map(s=>({type:'semi', refId:s.id, name:s.name, unit:s.yieldUnit})),
+    ...state.ingredients.map(i=>({type:'ingredient', refId:i.id, name:i.name, unit:i.baseUnit})),
+  ];
+}
+function bestMatch(name){
+  const candidates = matchCandidates();
+  let best=null, bestScore=0;
+  candidates.forEach(c=>{
+    const score = textSimilarity(name, c.name);
+    if(score>bestScore){ bestScore=score; best=c; }
+  });
+  return {match:best, score:bestScore};
+}
 function convertDraftToDish(id){
   const r = state.draftRecipes.find(x=>x.id===id);
   if(!r) return;
-  state.wizard = {step:2, editingId:null, name:r.name, components:[], opPct:0.15, fcPct:0.30};
-  toast('💡 Ghi chú công thức vẫn được giữ ở mục Công thức thử nghiệm để đối chiếu khi thêm nguyên liệu');
+  const lines = (r.ingredientsText||'').split('\n').map(l=>l.trim()).filter(Boolean);
+  if(!lines.length){
+    // Không có gì để gợi ý khớp — mở thẳng wizard trống như trước
+    state.wizard = {step:2, editingId:null, name:r.name, components:[], opPct:0.15, fcPct:0.30};
+    go('dishWizard');
+    return;
+  }
+  const rows = lines.map(line=>{
+    const parsed = parseIngredientLine(line);
+    const {match, score} = bestMatch(parsed.name);
+    return {...parsed, suggestedType: match?match.type:null, suggestedRefId: match?match.refId:null, suggestedName: match?match.name:null, score};
+  });
+  state.matchReview = { draftId:id, dishName:r.name, rows };
+  go('draftMatchReview');
+}
+
+function renderDraftMatchReview(){
+  const mr = state.matchReview;
+  if(!mr) return `<div class="screen"><button class="btn-ghost" onclick="go('draftList')">← Quay lại</button></div>`;
+  const options = () => {
+    const semiOpts = state.semiRecipes.map(s=>`<option value="semi:${s.id}">⭐ ${s.name}</option>`).join('');
+    const rawOpts = state.ingredients.map(i=>`<option value="ingredient:${i.id}">${i.name}</option>`).join('');
+    return `<optgroup label="Bán thành phẩm">${semiOpts}</optgroup><optgroup label="Nguyên liệu thô">${rawOpts}</optgroup>`;
+  };
+  const rows = mr.rows.map((row,idx)=>{
+    const hasGoodMatch = row.suggestedRefId && row.score >= 0.5;
+    const selectedVal = hasGoodMatch ? `${row.suggestedType}:${row.suggestedRefId}` : '';
+    const confidence = row.suggestedRefId ? `${Math.round(row.score*100)}% khớp với "${row.suggestedName}"` : 'Không tìm thấy gợi ý';
+    return `
+    <div class="card">
+      <div class="card-sub">Dòng gốc: "${row.raw}"</div>
+      <label style="margin-top:8px;">Ghép với</label>
+      <select id="mr_match_${idx}">
+        <option value="">— Bỏ qua dòng này —</option>
+        ${options()}
+      </select>
+      <div class="hint">${hasGoodMatch?'✅':'⚠️'} ${confidence}</div>
+      <div class="settings-grid" style="margin-top:10px;">
+        <div>
+          <label>Định mức</label>
+          <input type="number" id="mr_qty_${idx}" value="${row.qty!==null?row.qty:''}" placeholder="VD: 50">
+        </div>
+        <div>
+          <label>Đơn vị (theo dòng gốc)</label>
+          <input type="text" value="${row.unit||'—'}" disabled style="background:var(--cream-deep);">
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  return `
+  <div class="screen">
+    <button class="btn-ghost" onclick="go('draftList')">← Huỷ, quay lại</button>
+    <h1 class="page-title">Gợi ý khớp nguyên liệu</h1>
+    <p class="page-sub">App đã tự đọc và gợi ý khớp từng dòng với nguyên liệu/công thức nền đã có. Kiểm tra lại, sửa nếu cần, rồi xác nhận để đưa vào món "${mr.dishName}".</p>
+    ${rows}
+    <button class="btn btn-primary" style="margin-top:10px;" onclick="confirmDraftMatchReview()">✅ Xác nhận, thêm vào món</button>
+  </div>`;
+}
+function confirmDraftMatchReview(){
+  const mr = state.matchReview;
+  if(!mr) return;
+  const components = [];
+  mr.rows.forEach((row,idx)=>{
+    const selVal = document.getElementById(`mr_match_${idx}`).value;
+    const qty = parseFloat(document.getElementById(`mr_qty_${idx}`).value);
+    if(!selVal || !qty) return; // bỏ qua dòng chưa chọn hoặc chưa có định mức
+    const [type, refId] = selVal.split(':');
+    components.push({type, refId, qty});
+  });
+  if(!components.length){ toast('⚠️ Chưa có dòng nào được ghép — vui lòng chọn ít nhất 1 nguyên liệu'); return; }
+  state.wizard = {step:2, editingId:null, name:mr.dishName, components, opPct:0.15, fcPct:0.30};
+  state.matchReview = null;
+  toast(`✅ Đã ghép ${components.length} thành phần — kiểm tra lại rồi tiếp tục`);
   go('dishWizard');
 }
 
