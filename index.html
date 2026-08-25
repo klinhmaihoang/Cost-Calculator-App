@@ -178,6 +178,7 @@ const TABS = {
   SemiComponents: ['id','semiId','ingredientId','semiName','ingredientName','qty','unitPrice','unit'],
   Dishes: ['id','name','opPct','fcPct','cost','suggestedPrice','actualFcPct'],
   DishComponents: ['id','dishId','refId','type','dishName','componentName','typeLabel','qty','unitPrice','unit'],
+  DraftRecipes: ['id','name','notes','createdAt'],
 };
 
 // Tên cột hiển thị bằng tiếng Việt — chỉ dùng để GHI dòng tiêu đề cho đẹp/dễ đọc.
@@ -190,6 +191,7 @@ const VI_HEADERS = {
   SemiComponents: ['Mã','Mã bán thành phẩm','Mã nguyên liệu','Tên bán thành phẩm','Tên nguyên liệu','Định mức','Đơn giá','Đơn vị tính'],
   Dishes: ['Mã','Tên món','% Chi phí vận hành','% Food cost mục tiêu','Chi phí nguyên liệu','Giá bán đề xuất','% Food cost thực tế'],
   DishComponents: ['Mã','Mã món','Mã thành phần','Loại (mã hệ thống)','Tên món','Tên thành phần','Loại','Định mức','Đơn giá','Đơn vị tính'],
+  DraftRecipes: ['Mã','Tên món/công thức','Ghi chú công thức','Ngày tạo'],
 };
 const CURRENCY_COLS = { Ingredients: [7], SemiComponents: [7], DishComponents: [9], Dishes: [5, 6] };
 const PERCENT_COLS = { Dishes: [3, 4, 7] };
@@ -199,6 +201,7 @@ const TAB_TITLES = {
   SemiComponents: 'Chi tiết công thức nền',
   Dishes: 'Món',
   DishComponents: 'Chi tiết món',
+  DraftRecipes: 'Công thức thử nghiệm',
 };
 
 let accessToken = null;   // token OAuth của học viên đăng nhập Google
@@ -240,6 +243,7 @@ function stateToTabs(){
       dishName:d.name, componentName: componentName(c), typeLabel: c.type==='semi' ? 'Bán thành phẩm' : 'Nguyên liệu thô',
       qty:c.qty, unitPrice: componentUnitPrice(c), unit: componentUnit(c)
     }))),
+    DraftRecipes: state.draftRecipes.map(r=>({id:r.id, name:r.name, notes:r.notes, createdAt:r.createdAt})),
   };
 }
 function tabsToState(tabs){
@@ -250,6 +254,7 @@ function tabsToState(tabs){
   const dishComps = {};
   (tabs.DishComponents||[]).forEach(r=>{ (dishComps[r.dishId] = dishComps[r.dishId]||[]).push({type:r.type, refId:String(r.refId), qty:Number(r.qty)}); });
   state.dishes = (tabs.Dishes||[]).map(r=>({id:String(r.id), name:r.name, opPct:Number(r.opPct), fcPct:Number(r.fcPct), components: dishComps[r.id]||[]}));
+  state.draftRecipes = (tabs.DraftRecipes||[]).map(r=>({id:String(r.id), name:r.name, notes:r.notes||'', createdAt:r.createdAt||''}));
 }
 
 /* ---- lưu phiên đăng nhập để khỏi phải đăng nhập lại mỗi khi tải lại trang ----
@@ -334,6 +339,7 @@ async function ensureTabTitles(spreadsheetId){
     if(byTitle[niceName] !== undefined) return; // đã đúng tên mới
     const sid = byTitle[key]; // Sheet cũ còn tên tiếng Anh
     if(sid !== undefined) requests.push({updateSheetProperties:{properties:{sheetId:sid, title:niceName}, fields:'title'}});
+    else requests.push({addSheet:{properties:{title:niceName}}}); // tab hoàn toàn mới (tính năng vừa thêm), Sheet cũ chưa từng có
   });
   if(requests.length){
     await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
@@ -622,8 +628,10 @@ const state = {
   ],
   wizard: null,
   editIngredientId: null,
-  selectMode: { ingredients:false, semi:false, dishes:false },
-  selected: { ingredients:new Set(), semi:new Set(), dishes:new Set() },
+  draftRecipes: [],
+  editDraftId: null,
+  selectMode: { ingredients:false, semi:false, dishes:false, drafts:false },
+  selected: { ingredients:new Set(), semi:new Set(), dishes:new Set(), drafts:new Set() },
   adminKey: null,
   adminAccounts: [],
   adminTab: 'students',
@@ -784,6 +792,8 @@ function renderScreenBody(){
     case 'dishWizard': return renderDishWizard();
     case 'menu': return renderMenu();
     case 'dishDetail': return renderDishDetail();
+    case 'draftList': return renderDraftList();
+    case 'draftForm': return renderDraftForm();
     default: return '';
   }
 }
@@ -866,6 +876,13 @@ function renderHome(){
     <button class="home-tile" onclick="go('menu')">
       <div class="icon">④</div>
       <div class="txt"><div class="t">Menu &amp; giá bán của tôi</div><div class="s">${state.dishes.length} món đã lưu</div></div>
+    </button>
+
+    <div class="divider">hoặc</div>
+
+    <button class="home-tile" onclick="go('draftList')">
+      <div class="icon">📝</div>
+      <div class="txt"><div class="t">Công thức thử nghiệm</div><div class="s">Note nhanh khi đang thử món, chưa cần tính cost — ${state.draftRecipes.length} công thức</div></div>
     </button>
   </div>`;
 }
@@ -1515,6 +1532,7 @@ function bulkDelete(list){
   if(list==='ingredients') bulkDeleteIngredients();
   else if(list==='semi') bulkDeleteSemi();
   else if(list==='dishes') bulkDeleteDishes();
+  else if(list==='drafts') bulkDeleteDrafts();
 }
 
 /* ---------- misc ---------- */
@@ -1525,6 +1543,119 @@ function attachHandlers(){
     const badge = document.getElementById('w_unitBadge');
     if(ing && badge) badge.textContent = ing.baseUnit;
   }); }
+}
+
+/* =========================================================
+   CÔNG THỨC THỬ NGHIỆM — note nhanh công thức đang thử món,
+   CHƯA cần tính cost. Khi nào sẵn sàng, bấm "Chuyển thành món để
+   tính cost" để chuyển sang wizard tính giá đầy đủ.
+========================================================= */
+function renderDraftList(){
+  const sel = state.selectMode.drafts;
+  const rows = state.draftRecipes.map(r=>{
+    const preview = (r.notes||'').slice(0,140);
+    return `
+    <div class="card">
+      <div class="card-row">
+        ${sel?`<input type="checkbox" class="select-check" ${state.selected.drafts.has(r.id)?'checked':''} onchange="toggleSelectItem('drafts','${r.id}')">`:''}
+        <div style="flex:1;">
+          <div class="card-title">${r.name}</div>
+          <div class="card-sub" style="white-space:pre-wrap;">${preview}${(r.notes||'').length>140?'…':''}</div>
+        </div>
+        ${sel?'':`
+        <div class="card-actions-row">
+          <button class="icon-btn" onclick="editDraftRecipe('${r.id}')" title="Sửa">✏️</button>
+          <button class="icon-btn icon-btn-danger" onclick="confirmDeleteDraft('${r.id}')" title="Xoá">🗑️</button>
+        </div>`}
+      </div>
+      ${sel?'':`<button class="btn btn-outline btn-sm" style="margin-top:10px;width:100%;" onclick="convertDraftToDish('${r.id}')">💰 Chuyển thành món để tính cost</button>`}
+    </div>`;
+  }).join('') || `<div class="empty-state"><div class="big">📝</div>Chưa có công thức thử nghiệm nào</div>`;
+  return `
+  <div class="screen">
+    <button class="btn-ghost" onclick="go('home')">← Trang chủ</button>
+    <h1 class="page-title">Công thức thử nghiệm</h1>
+    <p class="page-sub">${sel?'Đánh dấu công thức muốn xoá.':'Note nhanh khi đang thử món — chưa cần tính cost ngay. Khi sẵn sàng, bấm "💰 Chuyển thành món để tính cost".'}</p>
+    ${sel ? '' : `<button class="btn btn-primary" style="margin-bottom:16px;" onclick="state.editDraftId=null;go('draftForm')">+ Thêm công thức thử nghiệm</button>`}
+    <div class="list-tools">
+      <button class="btn btn-outline btn-sm" onclick="toggleSelectMode('drafts')">${sel?'Huỷ chọn':'☑️ Chọn nhiều'}</button>
+      ${sel ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteAllDrafts()">🗑️ Xoá tất cả</button>`}
+    </div>
+    ${rows}
+  </div>
+  ${selectBar('drafts', state.draftRecipes.map(r=>r.id))}`;
+}
+function renderDraftForm(){
+  const editing = state.editDraftId ? state.draftRecipes.find(r=>r.id===state.editDraftId) : null;
+  return `
+  <div class="screen">
+    <button class="btn-ghost" onclick="go('draftList')">← Quay lại</button>
+    <h1 class="page-title">${editing?'Sửa công thức thử nghiệm':'Công thức thử nghiệm mới'}</h1>
+    <label>Tên món/công thức</label>
+    <input type="text" id="dr_name" value="${editing?editing.name:''}" placeholder="VD: Trà đào cam sả (đang thử tỉ lệ)">
+    <label>Ghi chú công thức</label>
+    <textarea id="dr_notes" placeholder="Ghi tự do: nguyên liệu, tỉ lệ, cách làm, lưu ý...
+VD:
+- Trà đen 8g
+- Đào ngâm 30g
+- Cam tươi 1/4 quả
+- Sả đập dập 1 nhánh
+- Ủ 5 phút, lắc đều với đá, nếm lại thấy hơi chua cần giảm cam" style="width:100%;min-height:240px;padding:14px;border:2px solid var(--line);border-radius:12px;font-size:15px;font-family:var(--sans);resize:vertical;">${editing?editing.notes:''}</textarea>
+    <button class="btn btn-primary" style="margin-top:22px;" onclick="saveDraftRecipe()">${editing?'Lưu thay đổi':'Lưu công thức'}</button>
+    ${editing?`<button class="btn btn-danger" style="margin-top:10px;" onclick="confirmDeleteDraft('${editing.id}')">Xoá công thức này</button>`:''}
+  </div>`;
+}
+function editDraftRecipe(id){ state.editDraftId = id; go('draftForm'); }
+function saveDraftRecipe(){
+  const name = document.getElementById('dr_name').value.trim();
+  const notes = document.getElementById('dr_notes').value;
+  if(!name){ toast('⚠️ Nhập tên món/công thức'); return; }
+  if(state.editDraftId){
+    Object.assign(state.draftRecipes.find(x=>x.id===state.editDraftId), {name, notes});
+    toast('✅ Đã lưu thay đổi');
+  } else {
+    state.draftRecipes.push({id: nextId('DR'), name, notes, createdAt: new Date().toISOString()});
+    toast('✅ Đã lưu công thức thử nghiệm');
+  }
+  state.editDraftId = null;
+  syncToCloud();
+  go('draftList');
+}
+function confirmDeleteDraft(id){
+  const r = state.draftRecipes.find(x=>x.id===id);
+  if(confirm(`Xoá công thức thử nghiệm "${r.name}"?`)) deleteDraft(id);
+}
+function deleteDraft(id){
+  state.draftRecipes = state.draftRecipes.filter(r=>r.id!==id);
+  toast('🗑️ Đã xoá');
+  syncToCloud();
+  go('draftList');
+}
+function bulkDeleteDrafts(){
+  const ids = Array.from(state.selected.drafts);
+  if(!ids.length){ toast('⚠️ Chưa chọn công thức nào'); return; }
+  if(!confirm(`Xoá ${ids.length} công thức thử nghiệm đã chọn?`)) return;
+  state.draftRecipes = state.draftRecipes.filter(r=>!ids.includes(r.id));
+  exitSelectMode('drafts');
+  toast(`🗑️ Đã xoá ${ids.length} công thức`);
+  syncToCloud();
+  go('draftList');
+}
+function deleteAllDrafts(){
+  if(!state.draftRecipes.length){ toast('Chưa có công thức thử nghiệm nào'); return; }
+  if(!confirm(`Xoá TOÀN BỘ ${state.draftRecipes.length} công thức thử nghiệm? Không thể hoàn tác.`)) return;
+  state.draftRecipes = [];
+  exitSelectMode('drafts');
+  toast('🗑️ Đã xoá toàn bộ công thức thử nghiệm');
+  syncToCloud();
+  go('draftList');
+}
+function convertDraftToDish(id){
+  const r = state.draftRecipes.find(x=>x.id===id);
+  if(!r) return;
+  state.wizard = {step:2, editingId:null, name:r.name, components:[], opPct:0.15, fcPct:0.30};
+  toast('💡 Ghi chú công thức vẫn được giữ ở mục Công thức thử nghiệm để đối chiếu khi thêm nguyên liệu');
+  go('dishWizard');
 }
 
 /* =========================================================
