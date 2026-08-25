@@ -1684,7 +1684,12 @@ function rawSimilarity(a,b){
   a=String(a||'').toLowerCase().trim(); b=String(b||'').toLowerCase().trim();
   if(!a||!b) return 0;
   if(a===b) return 1;
-  if(a.includes(b)||b.includes(a)) return 0.85 + 0.15*(Math.min(a.length,b.length)/Math.max(a.length,b.length));
+  const shorter = a.length<=b.length ? a : b, longer = a.length<=b.length ? b : a;
+  // Chỉ tính bonus "chứa nhau" khi chuỗi ngắn đủ dài và chiếm tỉ trọng đáng kể trong
+  // chuỗi dài — tránh trường hợp chữ ngắn kiểu "Đá" lọt trong "Hạt đác" bị tính khớp cao giả.
+  if(longer.includes(shorter) && shorter.length>=3 && shorter.length/longer.length>=0.4){
+    return 0.85 + 0.15*(shorter.length/longer.length);
+  }
   const dist = levenshtein(a,b);
   return Math.max(0, 1 - dist/Math.max(a.length,b.length));
 }
@@ -1736,7 +1741,15 @@ function convertDraftToDish(id){
   const rows = lines.map(line=>{
     const parsed = parseIngredientLine(line);
     const {match, score} = bestMatch(parsed.name);
-    return {...parsed, suggestedType: match?match.type:null, suggestedRefId: match?match.refId:null, suggestedName: match?match.name:null, score};
+    const hasGoodMatch = match && score >= 0.5;
+    return {
+      ...parsed,
+      suggestedType: match?match.type:null, suggestedRefId: match?match.refId:null, suggestedName: match?match.name:null, score,
+      selType: hasGoodMatch ? match.type : null,
+      selRefId: hasGoodMatch ? match.refId : null,
+      selQty: parsed.qty,
+      quickAddOpen: false,
+    };
   });
   state.matchReview = { draftId:id, dishName:r.name, rows };
   go('draftMatchReview');
@@ -1745,55 +1758,119 @@ function convertDraftToDish(id){
 function renderDraftMatchReview(){
   const mr = state.matchReview;
   if(!mr) return `<div class="screen"><button class="btn-ghost" onclick="go('draftList')">← Quay lại</button></div>`;
-  const options = () => {
-    const semiOpts = state.semiRecipes.map(s=>`<option value="semi:${s.id}">⭐ ${s.name}</option>`).join('');
-    const rawOpts = state.ingredients.map(i=>`<option value="ingredient:${i.id}">${i.name}</option>`).join('');
+  const options = (selVal) => {
+    const semiOpts = state.semiRecipes.map(s=>`<option value="semi:${s.id}" ${selVal===`semi:${s.id}`?'selected':''}>⭐ ${s.name}</option>`).join('');
+    const rawOpts = state.ingredients.map(i=>`<option value="ingredient:${i.id}" ${selVal===`ingredient:${i.id}`?'selected':''}>${i.name}</option>`).join('');
     return `<optgroup label="Bán thành phẩm">${semiOpts}</optgroup><optgroup label="Nguyên liệu thô">${rawOpts}</optgroup>`;
   };
   const rows = mr.rows.map((row,idx)=>{
+    const selVal = row.selRefId ? `${row.selType}:${row.selRefId}` : '';
+    const confidence = row.suggestedRefId ? `${Math.round(row.score*100)}% khớp với "${row.suggestedName}"` : 'Không tìm thấy gợi ý phù hợp trong dữ liệu hiện có';
     const hasGoodMatch = row.suggestedRefId && row.score >= 0.5;
-    const selectedVal = hasGoodMatch ? `${row.suggestedType}:${row.suggestedRefId}` : '';
-    const confidence = row.suggestedRefId ? `${Math.round(row.score*100)}% khớp với "${row.suggestedName}"` : 'Không tìm thấy gợi ý';
+    const quickAdd = row.quickAddOpen ? `
+      <div class="card" style="margin-top:10px;background:var(--cream-deep);">
+        <label style="margin-top:0;">Tên nguyên liệu mới</label>
+        <input type="text" id="mr_qa_name_${idx}" value="${row.name}">
+        <label>Nhóm</label>
+        <select id="mr_qa_group_${idx}">${GROUPS.map(g=>`<option value="${g}">${g}</option>`).join('')}</select>
+        <label>Quy cách mua (VD: Túi 500g)</label>
+        <input type="text" id="mr_qa_buyUnit_${idx}" placeholder="Túi 500g">
+        <div class="settings-grid" style="margin-top:12px;">
+          <div>
+            <label>Số lượng/quy cách</label>
+            <input type="number" id="mr_qa_packQty_${idx}" placeholder="500">
+          </div>
+          <div>
+            <label>Đơn vị tính</label>
+            <input type="text" id="mr_qa_baseUnit_${idx}" list="mrUnitOptions" value="${row.unit||'g'}">
+          </div>
+        </div>
+        <label>Giá mua (VNĐ)</label>
+        <input type="number" id="mr_qa_price_${idx}" placeholder="0 nếu miễn phí">
+        <div class="btn-row" style="margin-top:14px;">
+          <button class="btn btn-outline" onclick="mrCancelQuickAdd(${idx})">Huỷ</button>
+          <button class="btn btn-primary" onclick="mrSaveQuickAddIngredient(${idx})">Lưu &amp; ghép vào dòng này</button>
+        </div>
+      </div>` : `<button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="mrOpenQuickAdd(${idx})">🆕 Chưa có? Tạo nguyên liệu mới cho dòng này</button>`;
     return `
     <div class="card">
       <div class="card-sub">Dòng gốc: "${row.raw}"</div>
       <label style="margin-top:8px;">Ghép với</label>
-      <select id="mr_match_${idx}">
-        <option value="">— Bỏ qua dòng này —</option>
-        ${options()}
+      <select id="mr_match_${idx}" onchange="mrUpdateSelect(${idx}, this.value)">
+        <option value="" ${selVal===''?'selected':''}>— Bỏ qua dòng này —</option>
+        ${options(selVal)}
       </select>
       <div class="hint">${hasGoodMatch?'✅':'⚠️'} ${confidence}</div>
       <div class="settings-grid" style="margin-top:10px;">
         <div>
           <label>Định mức</label>
-          <input type="number" id="mr_qty_${idx}" value="${row.qty!==null?row.qty:''}" placeholder="VD: 50">
+          <input type="number" id="mr_qty_${idx}" value="${row.selQty!==null&&row.selQty!==undefined?row.selQty:''}" placeholder="VD: 50" oninput="mrUpdateQty(${idx}, this.value)">
         </div>
         <div>
           <label>Đơn vị (theo dòng gốc)</label>
           <input type="text" value="${row.unit||'—'}" disabled style="background:var(--cream-deep);">
         </div>
       </div>
+      ${quickAdd}
     </div>`;
   }).join('');
   return `
   <div class="screen">
     <button class="btn-ghost" onclick="go('draftList')">← Huỷ, quay lại</button>
     <h1 class="page-title">Gợi ý khớp nguyên liệu</h1>
-    <p class="page-sub">App đã tự đọc và gợi ý khớp từng dòng với nguyên liệu/công thức nền đã có. Kiểm tra lại, sửa nếu cần, rồi xác nhận để đưa vào món "${mr.dishName}".</p>
+    <p class="page-sub">App đã tự đọc và gợi ý khớp từng dòng với nguyên liệu/công thức nền đã có. Chưa có thì tạo mới ngay tại đây, không cần thoát ra. Kiểm tra lại rồi xác nhận để đưa vào món "${mr.dishName}".</p>
+    <datalist id="mrUnitOptions">
+      <option value="g"><option value="kg"><option value="ml"><option value="lít">
+      <option value="cái"><option value="quả"><option value="lát"><option value="gói">
+    </datalist>
     ${rows}
     <button class="btn btn-primary" style="margin-top:10px;" onclick="confirmDraftMatchReview()">✅ Xác nhận, thêm vào món</button>
   </div>`;
+}
+function mrUpdateSelect(idx, val){
+  const row = state.matchReview.rows[idx];
+  if(!val){ row.selType=null; row.selRefId=null; return; }
+  const [type, refId] = val.split(':');
+  row.selType = type; row.selRefId = refId;
+}
+function mrUpdateQty(idx, val){
+  state.matchReview.rows[idx].selQty = val;
+}
+function mrOpenQuickAdd(idx){
+  state.matchReview.rows[idx].quickAddOpen = true;
+  render();
+}
+function mrCancelQuickAdd(idx){
+  state.matchReview.rows[idx].quickAddOpen = false;
+  render();
+}
+function mrSaveQuickAddIngredient(idx){
+  const name = document.getElementById(`mr_qa_name_${idx}`).value.trim();
+  const group = document.getElementById(`mr_qa_group_${idx}`).value;
+  const buyUnit = document.getElementById(`mr_qa_buyUnit_${idx}`).value.trim() || '—';
+  const packQty = parseFloat(document.getElementById(`mr_qa_packQty_${idx}`).value);
+  const baseUnit = document.getElementById(`mr_qa_baseUnit_${idx}`).value.trim();
+  const priceRaw = document.getElementById(`mr_qa_price_${idx}`).value;
+  const price = parseFloat(priceRaw);
+  if(!name || !packQty || !baseUnit || priceRaw===''|| isNaN(price)){ toast('⚠️ Vui lòng nhập đủ thông tin nguyên liệu'); return; }
+  const newIng = {id: nextId('NL'), name, group, buyUnit, packQty, baseUnit, price};
+  state.ingredients.push(newIng);
+  const row = state.matchReview.rows[idx];
+  row.selType = 'ingredient';
+  row.selRefId = newIng.id;
+  row.quickAddOpen = false;
+  toast(`✅ Đã tạo "${name}" và ghép vào dòng này`);
+  syncToCloud(); // đồng bộ luôn nguyên liệu mới lên Sheet, không cần đợi lưu món
+  render();
 }
 function confirmDraftMatchReview(){
   const mr = state.matchReview;
   if(!mr) return;
   const components = [];
-  mr.rows.forEach((row,idx)=>{
-    const selVal = document.getElementById(`mr_match_${idx}`).value;
-    const qty = parseFloat(document.getElementById(`mr_qty_${idx}`).value);
-    if(!selVal || !qty) return; // bỏ qua dòng chưa chọn hoặc chưa có định mức
-    const [type, refId] = selVal.split(':');
-    components.push({type, refId, qty});
+  mr.rows.forEach(row=>{
+    const qty = parseFloat(row.selQty);
+    if(!row.selRefId || !qty) return; // bỏ qua dòng chưa chọn hoặc chưa có định mức
+    components.push({type: row.selType, refId: row.selRefId, qty});
   });
   if(!components.length){ toast('⚠️ Chưa có dòng nào được ghép — vui lòng chọn ít nhất 1 nguyên liệu'); return; }
   state.wizard = {step:2, editingId:null, name:mr.dishName, components, opPct:0.15, fcPct:0.30};
