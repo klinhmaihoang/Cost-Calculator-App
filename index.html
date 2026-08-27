@@ -134,6 +134,15 @@
   .card-actions{display:flex;flex-direction:column;align-items:flex-end;gap:8px;}
   .card-actions-row{display:flex;gap:6px;}
   .select-check{width:24px;height:24px;margin-right:12px;flex-shrink:0;accent-color:var(--amber);}
+  .sr-wrap{position:relative;}
+  .sr-input{width:100%;padding:14px 14px;border:2px solid var(--line);border-radius:12px;font-size:16px;font-family:var(--sans);background:var(--card);color:var(--ink);}
+  .sr-input:focus{outline:none;border-color:var(--amber);}
+  .sr-list{position:absolute;left:0;right:0;top:calc(100% + 4px);background:var(--card);border:1px solid var(--line);border-radius:12px;max-height:260px;overflow-y:auto;z-index:30;box-shadow:0 8px 24px rgba(0,0,0,.14);}
+  .sr-group-label{padding:8px 14px 4px;font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--ink-soft);}
+  .sr-row{padding:12px 14px;font-size:15px;cursor:pointer;border-top:1px solid var(--line);}
+  .sr-group:first-child .sr-row:first-of-type{border-top:none;}
+  .sr-row:hover{background:var(--cream-deep);}
+  .sr-empty{padding:14px;font-size:14px;color:var(--ink-soft);text-align:center;}
   .list-tools{display:flex;gap:10px;margin-bottom:16px;}
   .list-tools .btn{flex:1;}
   .select-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:480px;background:var(--card);border-top:1px solid var(--line);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:10px;box-shadow:0 -4px 16px rgba(0,0,0,.1);z-index:20;}
@@ -717,6 +726,59 @@ function exitSelectMode(list){
   state.selectMode[list] = false;
   state.selected[list].clear();
 }
+
+/* ---------- ô chọn có tìm kiếm (thay cho <select> thường khi danh sách dài) ---------- */
+function renderSearchSelect(id, groups, opts){
+  opts = opts || {};
+  const rowsHtml = groups.map(g=>`
+    <div class="sr-group">
+      ${g.label?`<div class="sr-group-label">${g.label}</div>`:''}
+      ${g.items.map(o=>`<div class="sr-row" data-value="${o.value}" data-label="${(o.label||'').replace(/"/g,'&quot;')}" onmousedown="srSelect('${id}',this.dataset.value,this.dataset.label${opts.onSelect?`,'${opts.onSelect}'`:''})">${o.label}</div>`).join('')}
+    </div>`).join('') || `<div class="sr-empty">Chưa có gì để chọn</div>`;
+  return `
+  <div class="sr-wrap">
+    <input type="text" id="sr_input_${id}" class="sr-input" placeholder="${opts.placeholder||'Gõ để tìm...'}" value="${(opts.selectedLabel||'').replace(/"/g,'&quot;')}"
+      oninput="srFilter('${id}')" onfocus="srShowList('${id}')" onblur="srHideList('${id}')" autocomplete="off">
+    <input type="hidden" id="sr_value_${id}" value="${opts.selectedValue||''}">
+    <div class="sr-list" id="sr_list_${id}" style="display:none;">${rowsHtml}</div>
+  </div>`;
+}
+function srShowList(id){
+  const el = document.getElementById('sr_list_'+id);
+  if(el) el.style.display = 'block';
+  srFilter(id);
+}
+function srHideList(id){
+  // trễ 1 chút để kịp bắt sự kiện chọn (mousedown) trước khi ô input mất focus ẩn danh sách
+  setTimeout(()=>{ const el=document.getElementById('sr_list_'+id); if(el) el.style.display='none'; }, 150);
+}
+function srFilter(id){
+  const inputEl = document.getElementById('sr_input_'+id);
+  const listEl = document.getElementById('sr_list_'+id);
+  if(!inputEl || !listEl) return;
+  const q = stripDiacritics(inputEl.value.toLowerCase().trim());
+  listEl.querySelectorAll('.sr-group').forEach(g=>{
+    let anyVisible = false;
+    g.querySelectorAll('.sr-row').forEach(r=>{
+      const label = stripDiacritics((r.dataset.label||'').toLowerCase());
+      const match = !q || label.includes(q);
+      r.style.display = match ? '' : 'none';
+      if(match) anyVisible = true;
+    });
+    g.style.display = anyVisible ? '' : 'none';
+  });
+  listEl.style.display = 'block';
+}
+function srSelect(id, value, label, onSelect){
+  const valEl = document.getElementById('sr_value_'+id);
+  const inputEl = document.getElementById('sr_input_'+id);
+  if(valEl) valEl.value = value;
+  if(inputEl) inputEl.value = label;
+  const listEl = document.getElementById('sr_list_'+id);
+  if(listEl) listEl.style.display = 'none';
+  if(onSelect && typeof window[onSelect]==='function') window[onSelect](id, value);
+}
+
 function selectBar(list, allIds){
   if(!state.selectMode[list]) return '';
   const n = state.selected[list].size;
@@ -1188,7 +1250,7 @@ function renderSemiWizard(){
     body = `
       <div class="card">
         <label style="margin-top:0;">Nguyên liệu</label>
-        <select id="w_ing">${semiWizardIngredientOptions()}</select>
+        ${renderSearchSelect('w_ing', [{label:null, items: state.ingredients.map(i=>({value:i.id, label:`${i.name} (${i.baseUnit})`}))}], {placeholder:'Gõ tên nguyên liệu để tìm...', onSelect:'srUpdateSemiUnitBadge'})}
         <label>Định mức cho cả mẻ</label>
         <div style="display:flex;gap:10px;align-items:center;">
           <input type="number" id="w_qty" placeholder="200" style="flex:1;">
@@ -1244,9 +1306,15 @@ function semiStep1Next(){
   if(!name){ toast('⚠️ Nhập tên công thức nền'); return; }
   state.wizard.name = name; state.wizard.step = 2; render();
 }
+function srUpdateSemiUnitBadge(id, value){
+  const ing = findIngredient(value);
+  const badge = document.getElementById('w_unitBadge');
+  if(ing && badge) badge.textContent = ing.baseUnit;
+}
 function addSemiComponent(){
-  const ingId = document.getElementById('w_ing').value;
+  const ingId = document.getElementById('sr_value_w_ing').value;
   const qty = parseFloat(document.getElementById('w_qty').value);
+  if(!ingId){ toast('⚠️ Chọn nguyên liệu'); return; }
   if(!qty){ toast('⚠️ Nhập định mức'); return; }
   state.wizard.components.push({ingredientId:ingId, qty});
   render();
@@ -1310,7 +1378,10 @@ function renderDishWizard(){
     body = `
       <div class="card">
         <label style="margin-top:0;">Thành phần (bán thành phẩm hoặc nguyên liệu)</label>
-        <select id="w_comp">${dishComponentOptions()}</select>
+        ${renderSearchSelect('w_comp', [
+          {label:'Bán thành phẩm', items: state.semiRecipes.map(s=>({value:`semi:${s.id}`, label:`⭐ ${s.name} (${s.yieldUnit})`}))},
+          {label:'Nguyên liệu thô', items: state.ingredients.map(i=>({value:`ingredient:${i.id}`, label:`${i.name} (${i.baseUnit})`}))}
+        ], {placeholder:'Gõ tên thành phần để tìm...'})}
         <label>Định mức sử dụng</label>
         <input type="number" id="w_qty" placeholder="50">
         <button class="btn btn-outline btn-sm" style="margin-top:14px;" onclick="addDishComponent()">+ Thêm vào món</button>
@@ -1376,8 +1447,9 @@ function dishStep1Next(){
   state.wizard.name = name; state.wizard.step = 2; render();
 }
 function addDishComponent(){
-  const raw = document.getElementById('w_comp').value;
+  const raw = document.getElementById('sr_value_w_comp').value;
   const qty = parseFloat(document.getElementById('w_qty').value);
+  if(!raw){ toast('⚠️ Chọn thành phần'); return; }
   if(!qty){ toast('⚠️ Nhập định mức'); return; }
   const [type, refId] = raw.split(':');
   state.wizard.components.push({type, refId, qty});
@@ -1542,12 +1614,7 @@ function bulkDelete(list){
 
 /* ---------- misc ---------- */
 function attachHandlers(){
-  const wIng = document.getElementById('w_ing');
-  if(wIng){ wIng.addEventListener('change', ()=>{
-    const ing = findIngredient(wIng.value);
-    const badge = document.getElementById('w_unitBadge');
-    if(ing && badge) badge.textContent = ing.baseUnit;
-  }); }
+  // (đã chuyển việc cập nhật badge đơn vị sang callback srUpdateSemiUnitBadge của ô tìm kiếm)
 }
 
 /* =========================================================
@@ -1761,10 +1828,15 @@ function convertDraftToDish(id){
 function renderDraftMatchReview(){
   const mr = state.matchReview;
   if(!mr) return `<div class="screen"><button class="btn-ghost" onclick="go('draftList')">← Quay lại</button></div>`;
-  const options = (selVal) => {
-    const semiOpts = state.semiRecipes.map(s=>`<option value="semi:${s.id}" ${selVal===`semi:${s.id}`?'selected':''}>⭐ ${s.name}</option>`).join('');
-    const rawOpts = state.ingredients.map(i=>`<option value="ingredient:${i.id}" ${selVal===`ingredient:${i.id}`?'selected':''}>${i.name}</option>`).join('');
-    return `<optgroup label="Bán thành phẩm">${semiOpts}</optgroup><optgroup label="Nguyên liệu thô">${rawOpts}</optgroup>`;
+  const matchRowGroups = ()=>[
+    {label:null, items:[{value:'', label:'— Bỏ qua dòng này —'}]},
+    {label:'Bán thành phẩm', items: state.semiRecipes.map(s=>({value:`semi:${s.id}`, label:`⭐ ${s.name}`}))},
+    {label:'Nguyên liệu thô', items: state.ingredients.map(i=>({value:`ingredient:${i.id}`, label:i.name}))}
+  ];
+  const matchRowSelectedLabel = (row)=>{
+    if(!row.selRefId) return '';
+    if(row.selType==='semi'){ const s=findSemi(row.selRefId); return s?('⭐ '+s.name):''; }
+    const i=findIngredient(row.selRefId); return i?i.name:'';
   };
   const rows = mr.rows.map((row,idx)=>{
     const selVal = row.selRefId ? `${row.selType}:${row.selRefId}` : '';
@@ -1799,10 +1871,7 @@ function renderDraftMatchReview(){
     <div class="card">
       <div class="card-sub">Dòng gốc: "${row.raw}"</div>
       <label style="margin-top:8px;">Ghép với</label>
-      <select id="mr_match_${idx}" onchange="mrUpdateSelect(${idx}, this.value)">
-        <option value="" ${selVal===''?'selected':''}>— Bỏ qua dòng này —</option>
-        ${options(selVal)}
-      </select>
+      ${renderSearchSelect('mr_'+idx, matchRowGroups(), {placeholder:'Gõ tên để tìm...', selectedValue:selVal, selectedLabel:matchRowSelectedLabel(row), onSelect:'srUpdateMatchRow'})}
       <div class="hint">${hasGoodMatch?'✅':'⚠️'} ${confidence}</div>
       <div class="settings-grid" style="margin-top:10px;">
         <div>
@@ -1830,8 +1899,10 @@ function renderDraftMatchReview(){
     <button class="btn btn-primary" style="margin-top:10px;" onclick="confirmDraftMatchReview()">✅ Xác nhận, thêm vào món</button>
   </div>`;
 }
-function mrUpdateSelect(idx, val){
+function srUpdateMatchRow(id, val){
+  const idx = parseInt(id.replace('mr_',''), 10);
   const row = state.matchReview.rows[idx];
+  if(!row) return;
   if(!val){ row.selType=null; row.selRefId=null; return; }
   const [type, refId] = val.split(':');
   row.selType = type; row.selRefId = refId;
