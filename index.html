@@ -373,7 +373,10 @@ async function writeAllTabs(sheetId, dataByTab){
 async function readAllTabs(sheetId){
   await ensureTabTitles(sheetId); // tự đổi tên tab cũ nếu cần, trước khi đọc theo tên mới
   const rangeParams = Object.keys(TABS).map(t=>`ranges=${encodeURIComponent(TAB_TITLES[t]+'!A1:Z')}`).join('&');
-  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchGet?${rangeParams}`, {headers:{Authorization:'Bearer '+accessToken}});
+  // valueRenderOption=UNFORMATTED_VALUE bắt buộc phải có — nếu không, các cột đã
+  // định dạng tiền tệ/phần trăm (VD 280.000 đ) sẽ bị trả về dạng CHUỖI hiển thị
+  // thay vì số gốc, làm Number(...) ra NaN sau khi đọc lại từ Sheet.
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchGet?${rangeParams}&valueRenderOption=UNFORMATTED_VALUE`, {headers:{Authorization:'Bearer '+accessToken}});
   const json = await res.json();
   const out = {};
   Object.keys(TABS).forEach((tab,i)=>{
