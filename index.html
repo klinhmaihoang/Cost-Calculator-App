@@ -1258,7 +1258,7 @@ function renderSemiWizard(){
   if(w.step===1){
     body = `
       <label>Đặt tên công thức nền</label>
-      <input type="text" id="w_name" value="${w.name}" placeholder="VD: Cà phê nền">
+      <input type="text" id="w_name" value="${w.name}" placeholder="VD: Cà phê nền" onkeydown="if(event.key==='Enter') semiStep1Next()">
       <div class="hint">Đây là tên bạn sẽ chọn lại khi lên món (VD: Cà phê đen đá dùng 50ml Cà phê nền)</div>
       <button class="btn btn-primary" style="margin-top:22px;" onclick="semiStep1Next()">Tiếp tục</button>`;
   } else if(w.step===2){
@@ -1273,7 +1273,7 @@ function renderSemiWizard(){
         ${renderSearchSelect('w_ing', [{label:null, items: state.ingredients.map(i=>({value:i.id, label:`${i.name} (${i.baseUnit})`}))}], {placeholder:'Gõ tên nguyên liệu để tìm...', onSelect:'srUpdateSemiUnitBadge'})}
         <label>Định mức cho cả mẻ</label>
         <div style="display:flex;gap:10px;align-items:center;">
-          <input type="number" id="w_qty" placeholder="200" style="flex:1;">
+          <input type="number" id="w_qty" placeholder="200" style="flex:1;" onkeydown="if(event.key==='Enter') addSemiComponent()">
           <span class="unit-badge" id="w_unitBadge">${state.ingredients[0]?state.ingredients[0].baseUnit:''}</span>
         </div>
         <button class="btn btn-outline btn-sm" style="margin-top:14px;" onclick="addSemiComponent()">+ Thêm vào công thức</button>
@@ -1289,7 +1289,7 @@ function renderSemiWizard(){
       <div class="card"><div class="card-sub">Tổng cost cả mẻ</div><div class="card-title">${fmtVND(totalSoFar)}</div></div>
       <label>Sản lượng thành phẩm thực tế thu được</label>
       <div style="display:flex;gap:10px;">
-        <input type="number" id="w_yieldQty" value="${w.yieldQty}" placeholder="1700" style="flex:2;">
+        <input type="number" id="w_yieldQty" value="${w.yieldQty}" placeholder="1700" style="flex:2;" onkeydown="if(event.key==='Enter') semiStep3Next()">
         <select id="w_yieldUnit" style="flex:1;">
           <option value="ml" ${w.yieldUnit==='ml'?'selected':''}>ml</option>
           <option value="g" ${w.yieldUnit==='g'?'selected':''}>g</option>
@@ -1387,7 +1387,7 @@ function renderDishWizard(){
   if(w.step===1){
     body = `
       <label>Đặt tên món</label>
-      <input type="text" id="w_name" value="${w.name}" placeholder="VD: Cà phê đen đá">
+      <input type="text" id="w_name" value="${w.name}" placeholder="VD: Cà phê đen đá" onkeydown="if(event.key==='Enter') dishStep1Next()">
       <button class="btn btn-primary" style="margin-top:22px;" onclick="dishStep1Next()">Tiếp tục</button>`;
   } else if(w.step===2){
     const list = w.components.map((c,idx)=>`
@@ -1403,7 +1403,7 @@ function renderDishWizard(){
           {label:'Nguyên liệu thô', items: state.ingredients.map(i=>({value:`ingredient:${i.id}`, label:`${i.name} (${i.baseUnit})`}))}
         ], {placeholder:'Gõ tên thành phần để tìm...'})}
         <label>Định mức sử dụng</label>
-        <input type="number" id="w_qty" placeholder="50">
+        <input type="number" id="w_qty" placeholder="50" onkeydown="if(event.key==='Enter') addDishComponent()">
         <button class="btn btn-outline btn-sm" style="margin-top:14px;" onclick="addDishComponent()">+ Thêm vào món</button>
       </div>
       ${list || '<div class="hint">Chưa có thành phần nào — thêm ở trên.</div>'}
