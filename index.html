@@ -175,7 +175,7 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-27-fix-sheet-guard';
+const APP_VERSION = '2026-08-27-safe-write-order';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -383,14 +383,11 @@ async function ensureTabTitles(spreadsheetId){
 }
 async function writeAllTabs(sheetId, dataByTab){
   await ensureTabTitles(sheetId); // tự đổi tên tab cũ (tiếng Anh) sang tiếng Việt nếu cần
-  // Xoá sạch từng tab trước khi ghi lại — nếu không, các dòng cũ (VD nguyên liệu
-  // vừa bị xoá trong app) sẽ vẫn còn sót lại trên Sheet thật vì batchUpdate chỉ
-  // ghi đè đúng số dòng của dữ liệu mới, không tự dọn phần thừa bên dưới.
-  const clearRanges = Object.keys(TABS).map(t=>`${TAB_TITLES[t]}!A1:Z10000`);
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchClear`, {
-    method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
-    body: JSON.stringify({ranges: clearRanges})
-  });
+  // QUAN TRỌNG: GHI dữ liệu mới TRƯỚC, dọn phần thừa còn sót lại SAU — không được
+  // làm ngược lại. Nếu xoá sạch trước rồi mới ghi, lỡ mạng bị gián đoạn đúng lúc
+  // giữa 2 bước, tab đó sẽ trống trơn vĩnh viễn. Ghi trước đảm bảo nếu có gián đoạn,
+  // dữ liệu mới vẫn đã nằm sẵn trên Sheet (tệ nhất là còn sót vài dòng cũ thừa phía
+  // dưới, vô hại và tự dọn ở lần đồng bộ kế tiếp).
   const data = Object.keys(TABS).map(tab=>{
     const keys = TABS[tab];
     const headers = VI_HEADERS[tab] || keys;
@@ -400,6 +397,18 @@ async function writeAllTabs(sheetId, dataByTab){
   await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`, {
     method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
     body: JSON.stringify({valueInputOption:'RAW', data})
+  });
+  // Dọn các dòng THỪA còn sót lại phía dưới dữ liệu vừa ghi (VD nguyên liệu vừa bị
+  // xoá trong app) — chỉ xoá từ NGAY SAU dữ liệu mới trở xuống, không đụng gì đến
+  // phần vừa ghi ở trên.
+  const clearRanges = Object.keys(TABS).map(tab=>{
+    const rowCount = (dataByTab[tab]||[]).length;
+    const startRow = rowCount + 2; // +1 cho dòng tiêu đề, +1 để bắt đầu từ dòng kế tiếp
+    return `${TAB_TITLES[tab]}!A${startRow}:Z10000`;
+  });
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchClear`, {
+    method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
+    body: JSON.stringify({ranges: clearRanges})
   });
   try{ await applySheetStyling(sheetId); }catch(e){ console.error('style error', e); } // không chặn lưu nếu style lỗi
 }
