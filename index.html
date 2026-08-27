@@ -173,6 +173,11 @@ const GOOGLE_DEMO = GOOGLE_CLIENT_ID.startsWith('DÁN_');
 const MHKL_DEMO = APPS_SCRIPT_URL.startsWith('DÁN_');
 const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa nối
 
+// Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
+// duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
+const APP_VERSION = '2026-08-27-fix-sheet-guard';
+console.log('CostApp phiên bản:', APP_VERSION);
+
 /* =========================================================
    CLOUD SYNC LAYER
    - Học viên đăng nhập Google  -> ghi/đọc trực tiếp Google Sheet
@@ -334,7 +339,13 @@ async function findAppSpreadsheet(){
   const q = encodeURIComponent("appProperties has { key='app' and value='tdh_cost_app' } and trashed=false");
   const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`, {headers:{Authorization:'Bearer '+accessToken}});
   const json = await res.json();
-  return (json.files && json.files[0]) ? json.files[0].id : null;
+  // QUAN TRỌNG: nếu lệnh tìm kiếm thất bại (lỗi mạng, hết hạn quyền...), TUYỆT ĐỐI
+  // không được coi là "chưa có Sheet nào" rồi âm thầm tạo Sheet mới — sẽ tạo trùng
+  // và làm mất kết nối tới dữ liệu thật đã có. Phải báo lỗi rõ ràng để dừng lại.
+  if(!res.ok || json.error){
+    throw new Error('Không tìm kiếm được trong Drive: ' + (json.error ? json.error.message : res.status));
+  }
+  return (json.files && json.files.length) ? json.files[0].id : null;
 }
 async function createAppSpreadsheet(){
   const body = { properties:{title:'CostApp - Dữ liệu của tôi'}, sheets: Object.keys(TABS).map(key=>({properties:{title:TAB_TITLES[key]}})) };
@@ -493,7 +504,19 @@ async function afterGoogleLogin(){
     showFullLoading('Đang chuẩn bị dữ liệu...');
     let sheetId = await findAppSpreadsheet();
     let isNew = false;
-    if(!sheetId){ sheetId = await createAppSpreadsheet(); isNew = true; }
+    if(!sheetId){
+      // An toàn: nếu máy này từng đăng nhập Google thành công trước đây mà giờ lại
+      // không tìm thấy Sheet cũ, RẤT có thể là lỗi tìm kiếm tạm thời — không được
+      // âm thầm tạo Sheet mới (sẽ làm lạc mất dữ liệu thật). Phải hỏi xác nhận.
+      const hadPriorSession = !!loadSessionCache();
+      if(hadPriorSession){
+        hideFullLoading();
+        const proceed = confirm('⚠️ Không tìm thấy Sheet dữ liệu cũ trong Drive, dù máy này từng đăng nhập trước đây.\n\nRất có thể đây là lỗi tìm kiếm tạm thời (thử lại sẽ hết) — KHÔNG nên tạo Sheet mới lúc này vì có thể làm lạc mất dữ liệu thật đang có.\n\nBấm OK để THỬ LẠI, hoặc Huỷ để dừng và liên hệ hỗ trợ nếu vẫn tiếp diễn.');
+        if(proceed){ loginWithGoogle(); }
+        return;
+      }
+      sheetId = await createAppSpreadsheet(); isNew = true;
+    }
     state.user = {name: email || 'Học viên (Google)', method:'google', sheetId};
     if(!isNew){
       tabsToState(await readAllTabs(sheetId)); // đã tự đổi tên tab cũ nếu cần
@@ -928,6 +951,7 @@ function renderLogin(){
     <p style="font-size:12px;margin-top:36px;color:#9A8F7A;">
       🔒 Dữ liệu công thức &amp; giá của bạn được cách ly hoàn toàn với các học viên khác.
     </p>
+    <p style="font-size:10px;margin-top:10px;color:#C9BEA6;">Bản: ${APP_VERSION}</p>
   </div>`;
 }
 function attachLoginHandlers(){}
