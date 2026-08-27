@@ -694,6 +694,9 @@ const state = {
   draftRecipes: [],
   editDraftId: null,
   matchReview: null,
+  bulkImportRows: [],
+  bulkImportFailed: [],
+  bulkDraftRows: [],
   selectMode: { ingredients:false, semi:false, dishes:false, drafts:false },
   selected: { ingredients:new Set(), semi:new Set(), dishes:new Set(), drafts:new Set() },
   adminKey: null,
@@ -912,6 +915,10 @@ function renderScreenBody(){
     case 'draftList': return renderDraftList();
     case 'draftForm': return renderDraftForm();
     case 'draftMatchReview': return renderDraftMatchReview();
+    case 'bulkImportForm': return renderBulkImportForm();
+    case 'bulkImportReview': return renderBulkImportReview();
+    case 'bulkDraftImportForm': return renderBulkDraftImportForm();
+    case 'bulkDraftImportReview': return renderBulkDraftImportReview();
     default: return '';
   }
 }
@@ -1032,7 +1039,8 @@ function renderIngredients(){
     <button class="btn-ghost" onclick="go('home')">← Trang chủ</button>
     <h1 class="page-title">Nguyên liệu của tôi</h1>
     <p class="page-sub">Giá mua thực tế — app tự quy đổi ra đơn giá theo gram / ml / cái. ${sel?'Đánh dấu các nguyên liệu muốn xoá.':'Chạm ✏️ để sửa, 🗑️ để xoá.'}</p>
-    ${sel ? '' : `<button class="btn btn-primary" style="margin-bottom:16px;" onclick="state.editIngredientId=null;go('ingredientForm')">+ Thêm nguyên liệu</button>`}
+    ${sel ? '' : `<button class="btn btn-primary" style="margin-bottom:10px;" onclick="state.editIngredientId=null;go('ingredientForm')">+ Thêm nguyên liệu</button>`}
+    ${sel ? '' : `<button class="btn btn-outline" style="margin-bottom:16px;" onclick="go('bulkImportForm')">📋 Dán nhanh nhiều nguyên liệu</button>`}
     <div class="list-tools">
       <button class="btn btn-outline btn-sm" onclick="toggleSelectMode('ingredients')">${sel?'Huỷ chọn':'☑️ Chọn nhiều'}</button>
       ${sel ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteAllIngredients()">🗑️ Xoá tất cả</button>`}
@@ -1041,6 +1049,93 @@ function renderIngredients(){
     <button class="btn-ghost" style="margin-top:14px;font-size:13px;" onclick="confirmShortenAllIds()">🔧 Rút gọn toàn bộ mã cũ (nguyên liệu, công thức nền, món)</button>
   </div>
   ${selectBar('ingredients', state.ingredients.map(i=>i.id))}`;
+}
+
+/* ---------- dán nhanh nhiều nguyên liệu ---------- */
+function renderBulkImportForm(){
+  return `
+  <div class="screen">
+    <button class="btn-ghost" onclick="go('ingredients')">← Quay lại</button>
+    <h1 class="page-title">Dán nhanh nhiều nguyên liệu</h1>
+    <p class="page-sub">Mỗi dòng 1 nguyên liệu, các phần cách nhau bằng dấu <b>|</b>, theo mẫu:</p>
+    <div class="card" style="background:var(--cream-deep);">
+      <div class="card-sub" style="font-family:monospace;white-space:pre-wrap;line-height:1.6;">Tên | Quy cách mua | Số lượng/quy cách | Đơn vị tính | Giá mua
+
+VD:
+Cà phê xay | Túi 1kg | 1000 | g | 280000
+Đường mía vàng Biên Hòa | Túi 1kg | 1000 | g | 28000
+Đá | Bao 2kg | 2000 | g | 10000</div>
+    </div>
+    <div class="hint" style="margin:10px 0;">Dạng rút gọn cũng được: chỉ cần "Tên | Giá" (đơn vị mặc định gram, quy cách 1) — sửa lại từng dòng ở bước xem trước cũng được, hoặc sửa lại trong app sau khi thêm.</div>
+    <textarea id="bi_text" placeholder="Dán danh sách vào đây..." style="width:100%;min-height:220px;padding:14px;border:2px solid var(--line);border-radius:12px;font-size:15px;font-family:var(--sans);resize:vertical;"></textarea>
+    <button class="btn btn-primary" style="margin-top:16px;" onclick="bulkImportPreview()">Xem trước</button>
+  </div>`;
+}
+function parseBulkIngredientLine(line){
+  const parts = line.split('|').map(s=>s.trim()).filter(s=>s!=='');
+  if(parts.length < 2 || !parts[0]) return null;
+  if(parts.length >= 5){
+    const packQty = parseFloat(parts[2].replace(/[^\d.]/g,''));
+    const price = parseFloat(parts[4].replace(/[^\d.]/g,''));
+    if(isNaN(packQty) || isNaN(price)) return null;
+    return { name:parts[0], group:'Nguyên liệu nền', buyUnit:parts[1]||'—', packQty, baseUnit:parts[3]||'g', price };
+  }
+  const price = parseFloat(parts[parts.length-1].replace(/[^\d.]/g,''));
+  if(isNaN(price)) return null;
+  return { name:parts[0], group:'Nguyên liệu nền', buyUnit:'—', packQty:1, baseUnit:'g', price };
+}
+function bulkImportPreview(){
+  const text = document.getElementById('bi_text').value;
+  const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+  if(!lines.length){ toast('⚠️ Chưa dán gì cả'); return; }
+  const rows = [], failed = [];
+  lines.forEach(line=>{
+    const parsed = parseBulkIngredientLine(line);
+    if(parsed) rows.push(parsed); else failed.push(line);
+  });
+  state.bulkImportRows = rows;
+  state.bulkImportFailed = failed;
+  go('bulkImportReview');
+}
+function renderBulkImportReview(){
+  const rows = state.bulkImportRows||[];
+  const failed = state.bulkImportFailed||[];
+  const rowsHtml = rows.map((r,idx)=>`
+    <div class="card">
+      <div class="card-row">
+        <div>
+          <div class="card-title">${r.name}</div>
+          <div class="card-sub">${r.group} · ${r.buyUnit} · ${fmtNum(r.packQty)} ${r.baseUnit} · ${fmtVND(r.price)}</div>
+        </div>
+        <button class="icon-btn icon-btn-danger" onclick="removeBulkImportRow(${idx})" title="Bỏ dòng này">🗑️</button>
+      </div>
+    </div>`).join('') || `<div class="empty-state">Không có dòng nào hợp lệ</div>`;
+  const failedHtml = failed.length ? `
+    <div class="card" style="background:var(--warn-bg);">
+      <div class="card-title" style="color:var(--warn);">⚠️ ${failed.length} dòng không đọc được</div>
+      <div class="card-sub" style="white-space:pre-wrap;">${failed.join('\n')}</div>
+      <div class="hint">Thiếu dấu | hoặc thiếu giá — quay lại sửa rồi dán lại.</div>
+    </div>` : '';
+  return `
+  <div class="screen">
+    <button class="btn-ghost" onclick="go('bulkImportForm')">← Quay lại sửa</button>
+    <h1 class="page-title">Xem trước (${rows.length} nguyên liệu)</h1>
+    <p class="page-sub">Kiểm tra lại, bỏ dòng nào sai (🗑️), rồi xác nhận thêm tất cả.</p>
+    ${failedHtml}
+    ${rowsHtml}
+    ${rows.length ? `<button class="btn btn-primary" style="margin-top:16px;" onclick="confirmBulkImport()">✅ Thêm tất cả ${rows.length} nguyên liệu</button>` : ''}
+  </div>`;
+}
+function removeBulkImportRow(idx){ state.bulkImportRows.splice(idx,1); render(); }
+function confirmBulkImport(){
+  const rows = state.bulkImportRows||[];
+  if(!rows.length){ toast('⚠️ Không có gì để thêm'); return; }
+  rows.forEach(r=>{ state.ingredients.push({id: nextId('NL'), ...r}); });
+  toast(`✅ Đã thêm ${rows.length} nguyên liệu`);
+  state.bulkImportRows = [];
+  state.bulkImportFailed = [];
+  syncToCloud();
+  go('ingredients');
 }
 
 function confirmShortenAllIds(){
@@ -1702,7 +1797,8 @@ function renderDraftList(){
     <button class="btn-ghost" onclick="go('home')">← Trang chủ</button>
     <h1 class="page-title">Công thức thử nghiệm</h1>
     <p class="page-sub">${sel?'Đánh dấu công thức muốn xoá.':'Note nhanh khi đang thử món — chưa cần tính cost ngay. Khi sẵn sàng, bấm "💰 Chuyển thành món để tính cost".'}</p>
-    ${sel ? '' : `<button class="btn btn-primary" style="margin-bottom:16px;" onclick="state.editDraftId=null;go('draftForm')">+ Thêm công thức thử nghiệm</button>`}
+    ${sel ? '' : `<button class="btn btn-primary" style="margin-bottom:10px;" onclick="state.editDraftId=null;go('draftForm')">+ Thêm công thức thử nghiệm</button>`}
+    ${sel ? '' : `<button class="btn btn-outline" style="margin-bottom:16px;" onclick="go('bulkDraftImportForm')">📋 Dán nhanh nhiều món</button>`}
     <div class="list-tools">
       <button class="btn btn-outline btn-sm" onclick="toggleSelectMode('drafts')">${sel?'Huỷ chọn':'☑️ Chọn nhiều'}</button>
       ${sel ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteAllDrafts()">🗑️ Xoá tất cả</button>`}
@@ -1742,6 +1838,84 @@ function renderDraftForm(){
   </div>`;
 }
 function editDraftRecipe(id){ state.editDraftId = id; go('draftForm'); }
+
+/* ---------- dán nhanh nhiều món cùng lúc (tạo hàng loạt công thức thử nghiệm) ---------- */
+function renderBulkDraftImportForm(){
+  return `
+  <div class="screen">
+    <button class="btn-ghost" onclick="go('draftList')">← Quay lại</button>
+    <h1 class="page-title">Dán nhanh nhiều món</h1>
+    <p class="page-sub">Mỗi món bắt đầu bằng tên trong dấu ngoặc vuông <b>[ ]</b>, các dòng nguyên liệu ngay bên dưới cho đến tên món tiếp theo.</p>
+    <div class="card" style="background:var(--cream-deep);">
+      <div class="card-sub" style="font-family:monospace;white-space:pre-wrap;line-height:1.6;">[Cà phê đen đá]
+Cà phê nền 50ml
+Đá 150g
+Ly + ống hút 1 bộ
+
+[Trà đào cam sả]
+Cốt trà 100ml
+Đào ngâm 30g
+Cam tươi 1/4 quả</div>
+    </div>
+    <div class="hint" style="margin:10px 0;">Xong bước này, vào từng món trong danh sách bấm "💰 Chuyển thành món để tính cost" — app tự gợi ý khớp nguyên liệu như bình thường.</div>
+    <textarea id="bdi_text" placeholder="Dán danh sách nhiều món vào đây..." style="width:100%;min-height:260px;padding:14px;border:2px solid var(--line);border-radius:12px;font-size:15px;font-family:var(--sans);resize:vertical;"></textarea>
+    <button class="btn btn-primary" style="margin-top:16px;" onclick="bulkDraftImportPreview()">Xem trước</button>
+  </div>`;
+}
+function parseBulkDraftText(text){
+  const lines = text.split('\n');
+  const dishes = [];
+  let current = null;
+  lines.forEach(raw=>{
+    const line = raw.trim();
+    const m = line.match(/^\[(.+)\]$/);
+    if(m){
+      current = { name: m[1].trim(), lines: [] };
+      dishes.push(current);
+    } else if(current && line){
+      current.lines.push(line);
+    }
+  });
+  return dishes.filter(d=>d.name).map(d=>({ name: d.name, ingredientsText: d.lines.join('\n') }));
+}
+function bulkDraftImportPreview(){
+  const text = document.getElementById('bdi_text').value;
+  const dishes = parseBulkDraftText(text);
+  if(!dishes.length){ toast('⚠️ Không tìm thấy món nào — nhớ đặt tên món trong dấu [ ]'); return; }
+  state.bulkDraftRows = dishes;
+  go('bulkDraftImportReview');
+}
+function renderBulkDraftImportReview(){
+  const rows = state.bulkDraftRows||[];
+  const rowsHtml = rows.map((r,idx)=>`
+    <div class="card">
+      <div class="card-row">
+        <div style="flex:1;">
+          <div class="card-title">${r.name}</div>
+          <div class="card-sub" style="white-space:pre-wrap;">${r.ingredientsText.slice(0,140)}${r.ingredientsText.length>140?'…':''}</div>
+        </div>
+        <button class="icon-btn icon-btn-danger" onclick="removeBulkDraftRow(${idx})" title="Bỏ món này">🗑️</button>
+      </div>
+    </div>`).join('') || `<div class="empty-state">Không có món nào</div>`;
+  return `
+  <div class="screen">
+    <button class="btn-ghost" onclick="go('bulkDraftImportForm')">← Quay lại sửa</button>
+    <h1 class="page-title">Xem trước (${rows.length} món)</h1>
+    <p class="page-sub">Kiểm tra lại, bỏ món nào sai (🗑️), rồi xác nhận thêm tất cả vào "Công thức thử nghiệm".</p>
+    ${rowsHtml}
+    ${rows.length ? `<button class="btn btn-primary" style="margin-top:16px;" onclick="confirmBulkDraftImport()">✅ Thêm tất cả ${rows.length} món</button>` : ''}
+  </div>`;
+}
+function removeBulkDraftRow(idx){ state.bulkDraftRows.splice(idx,1); render(); }
+function confirmBulkDraftImport(){
+  const rows = state.bulkDraftRows||[];
+  if(!rows.length){ toast('⚠️ Không có gì để thêm'); return; }
+  rows.forEach(r=>{ state.draftRecipes.push({id: nextId('DR'), name:r.name, ingredientsText:r.ingredientsText, stepsText:'', createdAt: new Date().toISOString()}); });
+  toast(`✅ Đã thêm ${rows.length} công thức thử nghiệm — vào từng món bấm "Chuyển thành món để tính cost"`);
+  state.bulkDraftRows = [];
+  syncToCloud();
+  go('draftList');
+}
 function saveDraftRecipe(){
   const name = document.getElementById('dr_name').value.trim();
   const ingredientsText = document.getElementById('dr_ingredients').value;
