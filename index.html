@@ -213,6 +213,19 @@ const TAB_TITLES = {
   DraftRecipes: 'Công thức thử nghiệm',
 };
 
+// Tra ngược "chữ ở dòng tiêu đề" -> "key nội bộ" cho từng tab. Dùng để ĐỌC dữ liệu
+// theo ĐÚNG TÊN CỘT thay vì theo vị trí cột — nhờ vậy nếu sau này có thêm/đổi thứ
+// tự cột, Sheet cũ (ghi từ phiên bản trước) vẫn được đọc đúng, không bị lệch cột.
+const HEADER_TO_KEY = {};
+Object.keys(TABS).forEach(tab=>{
+  HEADER_TO_KEY[tab] = {};
+  TABS[tab].forEach((key,i)=>{
+    HEADER_TO_KEY[tab][key] = key; // hỗ trợ Sheet rất cũ còn header kỹ thuật tiếng Anh
+    const viLabel = (VI_HEADERS[tab]||[])[i];
+    if(viLabel) HEADER_TO_KEY[tab][viLabel] = key;
+  });
+});
+
 let accessToken = null;   // token OAuth của học viên đăng nhập Google
 let tokenClient = null;
 
@@ -390,8 +403,14 @@ async function readAllTabs(sheetId){
   const out = {};
   Object.keys(TABS).forEach((tab,i)=>{
     const values = (json.valueRanges[i] && json.valueRanges[i].values) || [];
-    const keys = TABS[tab]; // đọc theo THỨ TỰ CỘT cố định, không phụ thuộc chữ ở dòng tiêu đề
-    out[tab] = values.slice(1).map(r=>{ const o={}; keys.forEach((k,idx)=>o[k]=r[idx]); return o; });
+    const headerRow = values[0] || [];
+    const map = HEADER_TO_KEY[tab] || {};
+    const colKeys = headerRow.map(h => map[h] || null); // đọc theo TÊN cột thật trên Sheet, không theo vị trí
+    out[tab] = values.slice(1).map(r=>{
+      const o = {};
+      colKeys.forEach((k, idx) => { if(k) o[k] = r[idx]; });
+      return o;
+    });
   });
   return out;
 }
@@ -1573,6 +1592,7 @@ function renderDishDetail(){
     <div class="breakdown-bar">${bars}</div>
     <label style="margin-top:22px;">Thành phần</label>
     ${compRows}
+    <div class="card-sub" style="margin:10px 2px 0;text-align:right;">Tổng cost nguyên liệu: <b>${fmtVND(dishCost(d))}</b></div>
     <button class="btn btn-outline" style="margin-top:18px;" onclick="startDishWizard('${d.id}')">✏️ Sửa món này</button>
     <button class="btn btn-danger" style="margin-top:10px;" onclick="confirmDeleteDish('${d.id}')">Xoá món này</button>
   </div>`;
