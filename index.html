@@ -1245,7 +1245,8 @@ function renderSemiWizard(){
   } else if(w.step===2){
     const list = w.components.map((c,idx)=>{
       const ing = findIngredient(c.ingredientId);
-      return `<div class="comp-row"><div class="info"><div class="n">${ing?ing.name:'?'}</div><div class="m">${fmtNum(c.qty)} ${ing?ing.baseUnit:''}</div></div><button class="remove" onclick="removeSemiComponent(${idx})">✕</button></div>`;
+      const unitPrice = ing ? ingredientUnitPrice(ing) : 0;
+      return `<div class="comp-row"><div class="info"><div class="n">${ing?ing.name:'?'}</div><div class="m">${fmtNum(c.qty)} ${ing?ing.baseUnit:''} · ${unitPrice.toLocaleString('vi-VN',{maximumFractionDigits:1})}đ/${ing?ing.baseUnit:''} · ${fmtVND(c.qty*unitPrice)}</div></div><button class="remove" onclick="removeSemiComponent(${idx})">✕</button></div>`;
     }).join('');
     body = `
       <div class="card">
