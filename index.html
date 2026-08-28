@@ -697,6 +697,7 @@ const state = {
   bulkImportRows: [],
   bulkImportFailed: [],
   bulkDraftRows: [],
+  listSearch: { ingredients:'', semi:'', dishes:'', drafts:'' },
   selectMode: { ingredients:false, semi:false, dishes:false, drafts:false },
   selected: { ingredients:new Set(), semi:new Set(), dishes:new Set(), drafts:new Set() },
   adminKey: null,
@@ -1014,9 +1015,11 @@ function renderHome(){
 }
 
 /* ---------- INGREDIENTS ---------- */
-function renderIngredients(){
+function buildIngredientRows(){
   const sel = state.selectMode.ingredients;
-  const rows = state.ingredients.map(ing=>`
+  const q = state.listSearch.ingredients;
+  const list = state.ingredients.filter(ing=>matchesSearch(ing.name, q));
+  return list.map(ing=>`
     <div class="card">
       <div class="card-row">
         ${sel?`<input type="checkbox" class="select-check" ${state.selected.ingredients.has(ing.id)?'checked':''} onchange="toggleSelectItem('ingredients','${ing.id}')">`:''}
@@ -1033,7 +1036,15 @@ function renderIngredients(){
           </div>
         </div>`}
       </div>
-    </div>`).join('');
+    </div>`).join('') || (q ? `<div class="empty-state">Không tìm thấy nguyên liệu nào khớp "${q}"</div>` : '');
+}
+function onIngredientSearchInput(val){
+  state.listSearch.ingredients = val;
+  const c = document.getElementById('ingredientsRowsContainer');
+  if(c) c.innerHTML = buildIngredientRows();
+}
+function renderIngredients(){
+  const sel = state.selectMode.ingredients;
   return `
   <div class="screen">
     <button class="btn-ghost" onclick="go('home')">← Trang chủ</button>
@@ -1041,11 +1052,12 @@ function renderIngredients(){
     <p class="page-sub">Giá mua thực tế — app tự quy đổi ra đơn giá theo gram / ml / cái. ${sel?'Đánh dấu các nguyên liệu muốn xoá.':'Chạm ✏️ để sửa, 🗑️ để xoá.'}</p>
     ${sel ? '' : `<button class="btn btn-primary" style="margin-bottom:10px;" onclick="state.editIngredientId=null;go('ingredientForm')">+ Thêm nguyên liệu</button>`}
     ${sel ? '' : `<button class="btn btn-outline" style="margin-bottom:16px;" onclick="go('bulkImportForm')">📋 Dán nhanh nhiều nguyên liệu</button>`}
+    <input type="text" id="search_ingredients" class="sr-input" placeholder="🔍 Tìm theo tên nguyên liệu..." value="${(state.listSearch.ingredients||'').replace(/"/g,'&quot;')}" oninput="onIngredientSearchInput(this.value)" style="margin-bottom:14px;">
     <div class="list-tools">
       <button class="btn btn-outline btn-sm" onclick="toggleSelectMode('ingredients')">${sel?'Huỷ chọn':'☑️ Chọn nhiều'}</button>
       ${sel ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteAllIngredients()">🗑️ Xoá tất cả</button>`}
     </div>
-    ${rows}
+    <div id="ingredientsRowsContainer">${buildIngredientRows()}</div>
     <button class="btn-ghost" style="margin-top:14px;font-size:13px;" onclick="confirmShortenAllIds()">🔧 Rút gọn toàn bộ mã cũ (nguyên liệu, công thức nền, món)</button>
   </div>
   ${selectBar('ingredients', state.ingredients.map(i=>i.id))}`;
@@ -1279,9 +1291,11 @@ function saveIngredient(){
 }
 
 /* ---------- SEMI RECIPES ---------- */
-function renderSemiList(){
+function buildSemiRows(){
   const sel = state.selectMode.semi;
-  const rows = state.semiRecipes.map(s=>`
+  const q = state.listSearch.semi;
+  const list = state.semiRecipes.filter(s=>matchesSearch(s.name, q));
+  return list.map(s=>`
     <div class="card">
       <div class="card-row">
         ${sel?`<input type="checkbox" class="select-check" ${state.selected.semi.has(s.id)?'checked':''} onchange="toggleSelectItem('semi','${s.id}')">`:''}
@@ -1298,18 +1312,27 @@ function renderSemiList(){
           </div>
         </div>`}
       </div>
-    </div>`).join('') || `<div class="empty-state"><div class="big">🧪</div>Chưa có công thức nền nào</div>`;
+    </div>`).join('') || (q ? `<div class="empty-state">Không tìm thấy công thức nào khớp "${q}"</div>` : `<div class="empty-state"><div class="big">🧪</div>Chưa có công thức nền nào</div>`);
+}
+function onSemiSearchInput(val){
+  state.listSearch.semi = val;
+  const c = document.getElementById('semiRowsContainer');
+  if(c) c.innerHTML = buildSemiRows();
+}
+function renderSemiList(){
+  const sel = state.selectMode.semi;
   return `
   <div class="screen">
     <button class="btn-ghost" onclick="go('home')">← Trang chủ</button>
     <h1 class="page-title">Công thức nền</h1>
     <p class="page-sub">Trà nền, cà phê nền... nấu 1 mẻ rồi dùng dần cho nhiều món. ${sel?'Đánh dấu công thức muốn xoá.':'Chạm ✏️ để sửa, 🗑️ để xoá.'}</p>
     ${sel ? '' : `<button class="btn btn-primary" style="margin-bottom:16px;" onclick="startSemiWizard()">+ Thêm công thức nền</button>`}
+    <input type="text" id="search_semi" class="sr-input" placeholder="🔍 Tìm theo tên công thức nền..." value="${(state.listSearch.semi||'').replace(/"/g,'&quot;')}" oninput="onSemiSearchInput(this.value)" style="margin-bottom:14px;">
     <div class="list-tools">
       <button class="btn btn-outline btn-sm" onclick="toggleSelectMode('semi')">${sel?'Huỷ chọn':'☑️ Chọn nhiều'}</button>
       ${sel ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteAllSemi()">🗑️ Xoá tất cả</button>`}
     </div>
-    ${rows}
+    <div id="semiRowsContainer">${buildSemiRows()}</div>
   </div>
   ${selectBar('semi', state.semiRecipes.map(s=>s.id))}`;
 }
@@ -1659,9 +1682,11 @@ function wizardHead(step,total,color){
 }
 
 /* ---------- MENU ---------- */
-function renderMenu(){
+function buildDishRows(){
   const sel = state.selectMode.dishes;
-  const rows = state.dishes.map(d=>{
+  const q = state.listSearch.dishes;
+  const list = state.dishes.filter(d=>matchesSearch(d.name, q));
+  return list.map(d=>{
     const fc = actualFoodCostPct(d);
     return `
     <div class="card ${sel?'':'card-tap'}" ${sel?'':`onclick="go('dishDetail',{selectedDishId:'${d.id}'})"`}>
@@ -1678,18 +1703,27 @@ function renderMenu(){
         </div>`}
       </div>
     </div>`;
-  }).join('') || `<div class="empty-state"><div class="big">🍹</div>Chưa có món nào — bấm "Tính giá món mới" ở trang chủ.</div>`;
+  }).join('') || (q ? `<div class="empty-state">Không tìm thấy món nào khớp "${q}"</div>` : `<div class="empty-state"><div class="big">🍹</div>Chưa có món nào — bấm "Tính giá món mới" ở trang chủ.</div>`);
+}
+function onDishSearchInput(val){
+  state.listSearch.dishes = val;
+  const c = document.getElementById('dishRowsContainer');
+  if(c) c.innerHTML = buildDishRows();
+}
+function renderMenu(){
+  const sel = state.selectMode.dishes;
   return `
   <div class="screen">
     <button class="btn-ghost" onclick="go('home')">← Trang chủ</button>
     <h1 class="page-title">Menu &amp; giá bán</h1>
     <p class="page-sub">${sel?'Đánh dấu món muốn xoá.':'Chạm vào món để xem chi tiết cost, ✏️ để sửa nhanh.'}</p>
     ${sel ? '' : `<button class="btn btn-primary" style="margin-bottom:16px;" onclick="startDishWizard()">+ Tính giá món mới</button>`}
+    <input type="text" id="search_dishes" class="sr-input" placeholder="🔍 Tìm theo tên món..." value="${(state.listSearch.dishes||'').replace(/"/g,'&quot;')}" oninput="onDishSearchInput(this.value)" style="margin-bottom:14px;">
     <div class="list-tools">
       <button class="btn btn-outline btn-sm" onclick="toggleSelectMode('dishes')">${sel?'Huỷ chọn':'☑️ Chọn nhiều'}</button>
       ${sel ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteAllDishes()">🗑️ Xoá tất cả</button>`}
     </div>
-    ${rows}
+    <div id="dishRowsContainer">${buildDishRows()}</div>
   </div>
   ${selectBar('dishes', state.dishes.map(d=>d.id))}`;
 }
@@ -1771,9 +1805,11 @@ function attachHandlers(){
    CHƯA cần tính cost. Khi nào sẵn sàng, bấm "Chuyển thành món để
    tính cost" để chuyển sang wizard tính giá đầy đủ.
 ========================================================= */
-function renderDraftList(){
+function buildDraftRows(){
   const sel = state.selectMode.drafts;
-  const rows = state.draftRecipes.map(r=>{
+  const q = state.listSearch.drafts;
+  const list = state.draftRecipes.filter(r=>matchesSearch(r.name, q));
+  return list.map(r=>{
     const preview = (r.ingredientsText||'').slice(0,140);
     return `
     <div class="card">
@@ -1791,7 +1827,15 @@ function renderDraftList(){
       </div>
       ${sel?'':`<button class="btn btn-outline btn-sm" style="margin-top:10px;width:100%;" onclick="convertDraftToDish('${r.id}')">💰 Chuyển thành món để tính cost</button>`}
     </div>`;
-  }).join('') || `<div class="empty-state"><div class="big">📝</div>Chưa có công thức thử nghiệm nào</div>`;
+  }).join('') || (q ? `<div class="empty-state">Không tìm thấy công thức nào khớp "${q}"</div>` : `<div class="empty-state"><div class="big">📝</div>Chưa có công thức thử nghiệm nào</div>`);
+}
+function onDraftSearchInput(val){
+  state.listSearch.drafts = val;
+  const c = document.getElementById('draftRowsContainer');
+  if(c) c.innerHTML = buildDraftRows();
+}
+function renderDraftList(){
+  const sel = state.selectMode.drafts;
   return `
   <div class="screen">
     <button class="btn-ghost" onclick="go('home')">← Trang chủ</button>
@@ -1799,11 +1843,12 @@ function renderDraftList(){
     <p class="page-sub">${sel?'Đánh dấu công thức muốn xoá.':'Note nhanh khi đang thử món — chưa cần tính cost ngay. Khi sẵn sàng, bấm "💰 Chuyển thành món để tính cost".'}</p>
     ${sel ? '' : `<button class="btn btn-primary" style="margin-bottom:10px;" onclick="state.editDraftId=null;go('draftForm')">+ Thêm công thức thử nghiệm</button>`}
     ${sel ? '' : `<button class="btn btn-outline" style="margin-bottom:16px;" onclick="go('bulkDraftImportForm')">📋 Dán nhanh nhiều món</button>`}
+    <input type="text" id="search_drafts" class="sr-input" placeholder="🔍 Tìm theo tên món/công thức..." value="${(state.listSearch.drafts||'').replace(/"/g,'&quot;')}" oninput="onDraftSearchInput(this.value)" style="margin-bottom:14px;">
     <div class="list-tools">
       <button class="btn btn-outline btn-sm" onclick="toggleSelectMode('drafts')">${sel?'Huỷ chọn':'☑️ Chọn nhiều'}</button>
       ${sel ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteAllDrafts()">🗑️ Xoá tất cả</button>`}
     </div>
-    ${rows}
+    <div id="draftRowsContainer">${buildDraftRows()}</div>
   </div>
   ${selectBar('drafts', state.draftRecipes.map(r=>r.id))}`;
 }
@@ -1965,6 +2010,10 @@ function deleteAllDrafts(){
    mức, so khớp gần đúng với nguyên liệu/công thức nền đã có ---- */
 function stripDiacritics(str){
   return String(str||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D');
+}
+function matchesSearch(name, query){
+  if(!query || !query.trim()) return true;
+  return stripDiacritics(String(name||'').toLowerCase()).includes(stripDiacritics(query.toLowerCase().trim()));
 }
 function levenshtein(a,b){
   const m=a.length, n=b.length;
