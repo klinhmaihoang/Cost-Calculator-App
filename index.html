@@ -175,7 +175,7 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-27-backup-restore';
+const APP_VERSION = '2026-08-27-batch-scale';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -718,6 +718,7 @@ const state = {
   bulkImportFailed: [],
   bulkDraftRows: [],
   listSearch: { ingredients:'', semi:'', dishes:'', drafts:'' },
+  scaleCalc: null,
   selectMode: { ingredients:false, semi:false, dishes:false, drafts:false },
   selected: { ingredients:new Set(), semi:new Set(), dishes:new Set(), drafts:new Set() },
   adminKey: null,
@@ -941,6 +942,7 @@ function renderScreenBody(){
     case 'bulkDraftImportForm': return renderBulkDraftImportForm();
     case 'bulkDraftImportReview': return renderBulkDraftImportReview();
     case 'backupScreen': return renderBackupScreen();
+    case 'semiScaleCalc': return renderSemiScaleCalc();
     default: return '';
   }
 }
@@ -1333,6 +1335,7 @@ function buildSemiRows(){
         <div class="card-actions">
           <div class="card-value">${semiUnitPrice(s).toLocaleString('vi-VN',{maximumFractionDigits:1})}đ/${s.yieldUnit}</div>
           <div class="card-actions-row">
+            <button class="icon-btn" onclick="openSemiScaleCalc('${s.id}')" title="Chia tỷ lệ mẻ khác">⚖️</button>
             <button class="icon-btn" onclick="startSemiWizard('${s.id}')" title="Sửa">✏️</button>
             <button class="icon-btn icon-btn-danger" onclick="confirmDeleteSemi('${s.id}')" title="Xoá">🗑️</button>
           </div>
@@ -2329,6 +2332,92 @@ function confirmDraftMatchReview(){
   state.matchReview = null;
   toast(`✅ Đã ghép ${components.length} thành phần — kiểm tra lại rồi tiếp tục`);
   go('dishWizard');
+}
+
+/* =========================================================
+   CHIA TỶ LỆ MẺ — với công thức nền làm mẻ lớn, tự tính ra đúng
+   số lượng từng nguyên liệu cho 1 mẻ nhỏ hơn (hoặc lớn hơn) theo
+   đúng tỷ lệ, không cần tự bấm máy tính. Đơn giá/đơn vị KHÔNG đổi
+   dù mẻ to hay nhỏ — chỉ số lượng nguyên liệu cần chuẩn bị đổi.
+========================================================= */
+function openSemiScaleCalc(semiId){
+  if(!findSemi(semiId)) return;
+  state.scaleCalc = { semiId, targetQty: '' };
+  go('semiScaleCalc');
+}
+function renderSemiScaleCalc(){
+  const sc = state.scaleCalc;
+  const s = sc ? findSemi(sc.semiId) : null;
+  if(!s) return `<div class="screen"><button class="btn-ghost" onclick="go('semiList')">← Quay lại</button><div class="empty-state">Không tìm thấy công thức</div></div>`;
+  return `
+  <div class="screen">
+    <button class="btn-ghost" onclick="state.scaleCalc=null;go('semiList')">← Quay lại</button>
+    <h1 class="page-title">Chia tỷ lệ mẻ</h1>
+    <p class="page-sub">Công thức gốc: <b>${s.name}</b> — mẻ ${fmtNum(s.yieldQty)} ${s.yieldUnit}, tổng cost ${fmtVND(semiTotalCost(s))} (${semiUnitPrice(s).toLocaleString('vi-VN',{maximumFractionDigits:2})}đ/${s.yieldUnit} — đơn giá này không đổi dù mẻ to hay nhỏ).</p>
+    <label>Mẻ mong muốn (${s.yieldUnit})</label>
+    <input type="number" id="sc_target" value="${sc.targetQty}" placeholder="VD: 1500" oninput="updateScaleCalc(this.value)">
+    <div id="scaleResultContainer">${buildScaleResult()}</div>
+  </div>`;
+}
+function buildScaleResult(){
+  const sc = state.scaleCalc;
+  const s = sc ? findSemi(sc.semiId) : null;
+  if(!s) return '';
+  const target = parseFloat(sc.targetQty);
+  if(!target || target<=0) return `<div class="hint" style="margin-top:14px;">Nhập mẻ mong muốn để xem kết quả chia tỷ lệ.</div>`;
+  const ratio = target / s.yieldQty;
+  const rows = s.components.map(c=>{
+    const ing = findIngredient(c.ingredientId);
+    const scaledQty = c.qty * ratio;
+    return `<div class="comp-row"><div class="info"><div class="n">${ing?ing.name:'(đã xoá)'}</div><div class="m">${fmtNum(Math.round(scaledQty*100)/100)} ${ing?ing.baseUnit:''}</div></div></div>`;
+  }).join('');
+  const scaledCost = semiTotalCost(s) * ratio;
+  return `
+    <div class="price-hero" style="margin-top:16px;">
+      <div class="lbl">Tổng cost cho mẻ ${fmtNum(target)} ${s.yieldUnit}</div>
+      <div class="val" style="font-size:28px;">${fmtVND(scaledCost)}</div>
+      <div class="card-sub">Tỷ lệ ${(ratio*100).toFixed(1)}% so với mẻ gốc</div>
+    </div>
+    <label style="margin-top:6px;">Nguyên liệu cần chuẩn bị</label>
+    ${rows}
+    <button class="btn btn-outline" style="margin-top:16px;width:100%;" onclick="openSaveScaledSemi()">💾 Lưu thành công thức nền riêng</button>
+    <div id="saveScaledForm"></div>`;
+}
+function updateScaleCalc(val){
+  if(!state.scaleCalc) return;
+  state.scaleCalc.targetQty = val;
+  const c = document.getElementById('scaleResultContainer');
+  if(c) c.innerHTML = buildScaleResult();
+}
+function openSaveScaledSemi(){
+  const sc = state.scaleCalc;
+  const s = sc ? findSemi(sc.semiId) : null;
+  const target = parseFloat(sc && sc.targetQty);
+  if(!s || !target || target<=0){ toast('⚠️ Nhập mẻ mong muốn trước'); return; }
+  const container = document.getElementById('saveScaledForm');
+  if(!container) return;
+  const defaultName = `${s.name} (mẻ ${fmtNum(target)}${s.yieldUnit})`;
+  container.innerHTML = `
+    <div class="card" style="margin-top:12px;background:var(--cream-deep);">
+      <label style="margin-top:0;">Tên công thức nền mới</label>
+      <input type="text" id="scaled_name" value="${defaultName}">
+      <button class="btn btn-primary" style="margin-top:14px;" onclick="confirmSaveScaledSemi()">Lưu công thức nền này</button>
+    </div>`;
+}
+function confirmSaveScaledSemi(){
+  const sc = state.scaleCalc;
+  const s = sc ? findSemi(sc.semiId) : null;
+  const target = parseFloat(sc && sc.targetQty);
+  if(!s || !target) return;
+  const name = document.getElementById('scaled_name').value.trim();
+  if(!name){ toast('⚠️ Nhập tên công thức mới'); return; }
+  const ratio = target / s.yieldQty;
+  const newComponents = s.components.map(c=>({ ingredientId: c.ingredientId, qty: Math.round(c.qty*ratio*100)/100 }));
+  state.semiRecipes.push({ id: nextId('BTP'), name, components:newComponents, yieldQty: target, yieldUnit: s.yieldUnit });
+  toast(`✅ Đã lưu "${name}"`);
+  syncToCloud();
+  state.scaleCalc = null;
+  go('semiList');
 }
 
 /* =========================================================
