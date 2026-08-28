@@ -175,7 +175,7 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-27-batch-scale';
+const APP_VERSION = '2026-08-28-conflict-guard-guide';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -381,13 +381,28 @@ async function ensureTabTitles(spreadsheetId){
     });
   }
 }
+async function getFileModifiedTime(sheetId){
+  try{
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${sheetId}?fields=modifiedTime`, {headers:{Authorization:'Bearer '+accessToken}});
+    const json = await res.json();
+    return json.modifiedTime || null;
+  }catch(e){ return null; }
+}
 async function writeAllTabs(sheetId, dataByTab){
   await ensureTabTitles(sheetId); // tự đổi tên tab cũ (tiếng Anh) sang tiếng Việt nếu cần
-  // QUAN TRỌNG: GHI dữ liệu mới TRƯỚC, dọn phần thừa còn sót lại SAU — không được
-  // làm ngược lại. Nếu xoá sạch trước rồi mới ghi, lỡ mạng bị gián đoạn đúng lúc
-  // giữa 2 bước, tab đó sẽ trống trơn vĩnh viễn. Ghi trước đảm bảo nếu có gián đoạn,
-  // dữ liệu mới vẫn đã nằm sẵn trên Sheet (tệ nhất là còn sót vài dòng cũ thừa phía
-  // dưới, vô hại và tự dọn ở lần đồng bộ kế tiếp).
+
+  // QUAN TRỌNG — CHỐNG GHI ĐÈ TỪ NHIỀU TAB/THIẾT BỊ: nếu Sheet đã bị thay đổi bởi
+  // nơi khác (VD 1 tab cũ khác vẫn còn mở, hoặc đăng nhập ở máy khác) kể từ lần
+  // đọc/ghi gần nhất của phiên này, KHÔNG được âm thầm ghi đè — dễ làm mất đúng
+  // phần dữ liệu mới hơn từ nơi kia. Phải hỏi xác nhận trước khi tiếp tục.
+  if(state.user && state.user.lastKnownModifiedTime){
+    const currentModified = await getFileModifiedTime(sheetId);
+    if(currentModified && currentModified !== state.user.lastKnownModifiedTime){
+      const proceed = confirm('⚠️ Phát hiện dữ liệu trên Google Sheet đã bị thay đổi từ nơi khác (có thể do bạn đang mở app ở tab hoặc thiết bị khác) kể từ lần đồng bộ gần nhất tại đây.\n\nNếu tiếp tục lưu từ đây, có thể sẽ ghi đè mất dữ liệu mới hơn từ nơi kia.\n\n✅ Khuyên dùng: bấm Huỷ, rồi tải lại trang này để lấy đúng dữ liệu mới nhất trước khi thao tác tiếp.\n⚠️ Chỉ bấm OK nếu bạn chắc chắn dữ liệu ở ĐÂY mới là bản đúng cần giữ lại.');
+      if(!proceed) throw new Error('Đã huỷ lưu do phát hiện xung đột dữ liệu với nơi khác');
+    }
+  }
+
   const data = Object.keys(TABS).map(tab=>{
     const keys = TABS[tab];
     const headers = VI_HEADERS[tab] || keys;
@@ -411,6 +426,7 @@ async function writeAllTabs(sheetId, dataByTab){
     body: JSON.stringify({ranges: clearRanges})
   });
   try{ await applySheetStyling(sheetId); }catch(e){ console.error('style error', e); } // không chặn lưu nếu style lỗi
+  if(state.user) state.user.lastKnownModifiedTime = await getFileModifiedTime(sheetId); // cập nhật mốc sau khi ghi xong thành công
 }
 async function readAllTabs(sheetId){
   await ensureTabTitles(sheetId); // tự đổi tên tab cũ nếu cần, trước khi đọc theo tên mới
@@ -531,6 +547,7 @@ async function afterGoogleLogin(){
       tabsToState(await readAllTabs(sheetId)); // đã tự đổi tên tab cũ nếu cần
       try{ await applySheetStyling(sheetId); }catch(e){ console.error('style error', e); } // làm mới màu/định dạng ngay cả khi chỉ đăng nhập, không cần sửa gì
     }
+    state.user.lastKnownModifiedTime = await getFileModifiedTime(sheetId); // mốc để phát hiện thay đổi từ nơi khác sau này
     saveSessionCache();
     hideFullLoading();
     toast(isNew ? '✅ Đã tạo Sheet dữ liệu trong Drive của bạn' : '✅ Đã tải dữ liệu từ Sheet của bạn');
@@ -719,6 +736,7 @@ const state = {
   bulkDraftRows: [],
   listSearch: { ingredients:'', semi:'', dishes:'', drafts:'' },
   scaleCalc: null,
+  dishScaleCalc: null,
   selectMode: { ingredients:false, semi:false, dishes:false, drafts:false },
   selected: { ingredients:new Set(), semi:new Set(), dishes:new Set(), drafts:new Set() },
   adminKey: null,
@@ -943,6 +961,8 @@ function renderScreenBody(){
     case 'bulkDraftImportReview': return renderBulkDraftImportReview();
     case 'backupScreen': return renderBackupScreen();
     case 'semiScaleCalc': return renderSemiScaleCalc();
+    case 'dishScaleCalc': return renderDishScaleCalc();
+    case 'guideScreen': return renderGuideScreen();
     default: return '';
   }
 }
@@ -1039,6 +1059,70 @@ function renderHome(){
       <div class="icon">💾</div>
       <div class="txt"><div class="t">Sao lưu &amp; Khôi phục</div><div class="s">Tải bản sao lưu về máy — nên làm trước mỗi lần cập nhật app</div></div>
     </button>
+
+    <button class="home-tile" onclick="go('guideScreen')">
+      <div class="icon">❓</div>
+      <div class="txt"><div class="t">Hướng dẫn sử dụng</div><div class="s">Giải thích từng nút, từng phần trong app</div></div>
+    </button>
+  </div>`;
+}
+
+function renderGuideScreen(){
+  const guideCard = (title, body) => `
+    <div class="card">
+      <div class="card-title">${title}</div>
+      <div class="card-sub" style="margin-top:6px;line-height:1.6;">${body}</div>
+    </div>`;
+  return `
+  <div class="screen">
+    <button class="btn-ghost" onclick="go('home')">← Trang chủ</button>
+    <h1 class="page-title">Hướng dẫn sử dụng</h1>
+    <p class="page-sub">Giải thích ý nghĩa từng nút và từng phần trong app.</p>
+
+    ${guideCard('🔢 Quy trình 4 bước chính', `
+      ① <b>Nguyên liệu</b> → ② <b>Công thức nền</b> (nếu có pha chế trước) → ③ <b>Tính giá món mới</b> → ④ <b>Menu &amp; giá bán</b>.<br>
+      Làm đúng thứ tự này thì giá bán tính ra mới chính xác.`)}
+
+    ${guideCard('🔑 Ý nghĩa các icon hay gặp', `
+      ✏️ = Sửa &nbsp;·&nbsp; 🗑️ = Xoá &nbsp;·&nbsp; ☑️ = Chọn nhiều để xoá hàng loạt &nbsp;·&nbsp; 🔍 = Tìm theo tên<br>
+      🆕 = Tạo nhanh nguyên liệu mới ngay tại chỗ, không cần thoát ra<br>
+      ⚖️ = <b>Chia tỷ lệ mẻ</b> (ở Công thức nền) — nhập mẻ nhỏ hơn/lớn hơn mong muốn, app tự tính lại số lượng từng nguyên liệu theo đúng tỷ lệ<br>
+      🔀 = <b>Nhân tỷ lệ theo size ly</b> (ở Menu &amp; giá bán) — có công thức ly 500ml, muốn tính cho ly 700ml/1000ml thì dùng nút này<br>
+      📋 = Dán nhanh nhiều dòng cùng lúc (nguyên liệu hoặc món), đỡ phải thêm từng cái một<br>
+      💰 = Chuyển 1 công thức thử nghiệm thành món chính thức để tính giá bán`)}
+
+    ${guideCard('① Nguyên liệu', `
+      Nhập giá mua thực tế + quy cách đóng gói — app tự quy đổi ra đơn giá theo từng gram/ml/cái.<br>
+      "Số lượng/quy cách" là số gram/ml/cái có TRONG 1 đơn vị mua (VD mua "Túi 1kg" thì gõ 1000, vì 1kg = 1000g).<br>
+      Nút <b>📋 Dán nhanh nhiều nguyên liệu</b>: dán cả danh sách 1 lần theo mẫu <code>Tên | Quy cách | Số lượng | Đơn vị | Giá</code>, hoặc rút gọn chỉ <code>Tên | Giá</code>.`)}
+
+    ${guideCard('② Công thức nền', `
+      Dùng cho các loại pha/nấu trước 1 mẻ lớn rồi dùng dần (trà nền, cà phê nền...). Khai nguyên liệu cho 1 mẻ, rồi nhập <b>sản lượng thực tế</b> thu được (có thể ít hơn tổng nguyên liệu do hao hụt) để ra đúng đơn giá/ml.<br>
+      Bấm <b>⚖️</b> để chia tỷ lệ ra mẻ nhỏ hơn (VD mẻ gốc 3L, muốn làm thử 1.5L) — có thể lưu lại thành công thức riêng nếu dùng lâu dài.`)}
+
+    ${guideCard('③ Tính giá món mới', `
+      Chọn từng thành phần (nguyên liệu thô hoặc bán thành phẩm) + định mức sử dụng cho 1 ly/1 phần. Chưa có nguyên liệu nào đó thì bấm <b>🆕</b> tạo ngay tại chỗ.<br>
+      Bước cuối chọn % chi phí vận hành và % food cost mục tiêu — app tự tính giá bán đề xuất và lợi nhuận gộp.`)}
+
+    ${guideCard('④ Menu &amp; giá bán', `
+      Xem lại toàn bộ món đã lưu, giá bán đề xuất, % food cost thực tế (xanh = tốt, đỏ = cao cần xem lại).<br>
+      Bấm <b>🔀</b> để tính nhanh cho size ly khác — nhập size gốc + size muốn tính, app tự nhân tỷ lệ tất cả thành phần.`)}
+
+    ${guideCard('📝 Công thức thử nghiệm', `
+      Dùng khi đang thử món, chỉ cần ghi lại nguyên liệu + cách làm, <b>chưa cần tính cost ngay</b>. Khi nào sẵn sàng, bấm <b>💰 Chuyển thành món để tính cost</b> — app tự đọc từng dòng, gợi ý khớp với nguyên liệu/công thức nền đã có, xác nhận là xong.<br>
+      Nút <b>📋 Dán nhanh nhiều món</b>: dán cả loạt công thức 1 lần, mỗi món bắt đầu bằng tên trong dấu <code>[ ]</code>.`)}
+
+    ${guideCard('💾 Sao lưu &amp; Khôi phục — RẤT QUAN TRỌNG', `
+      Tải file <code>.json</code> chứa toàn bộ dữ liệu về máy — hoàn toàn độc lập với Google Sheet, không phụ thuộc mạng hay lỗi đồng bộ.<br>
+      <b>Nên bấm sao lưu:</b><br>
+      • Mỗi ngày sau khi nhập liệu xong, hoặc<br>
+      • Trước khi thoát app / đóng trình duyệt, hoặc<br>
+      • Trước mỗi lần app được cập nhật phiên bản mới (quan trọng nhất)<br>
+      Nếu lỡ có sự cố mất dữ liệu, vào lại mục này, bấm "Chọn file để khôi phục" và chọn đúng file sao lưu gần nhất — không cần nhập tay lại từ đầu.`)}
+
+    ${guideCard('🔒 Bảo mật dữ liệu', `
+      Đăng nhập Google: dữ liệu nằm trong Drive riêng của bạn, chỉ mình bạn truy cập được.<br>
+      Đăng nhập mã học viên: dữ liệu tách riêng theo từng tài khoản, học viên khác không xem được của nhau.`)}
   </div>`;
 }
 
@@ -1803,7 +1887,10 @@ function buildDishRows(){
         ${sel ? `<div class="card-value">${fmtVND(suggestedPrice(d))}</div>` : `
         <div class="card-actions">
           <div class="card-value">${fmtVND(suggestedPrice(d))}</div>
-          <button class="icon-btn" onclick="event.stopPropagation();startDishWizard('${d.id}')" title="Sửa">✏️</button>
+          <div class="card-actions-row">
+            <button class="icon-btn" onclick="event.stopPropagation();openDishScaleCalc('${d.id}')" title="Nhân tỷ lệ theo size ly">🔀</button>
+            <button class="icon-btn" onclick="event.stopPropagation();startDishWizard('${d.id}')" title="Sửa">✏️</button>
+          </div>
         </div>`}
       </div>
     </div>`;
@@ -2418,6 +2505,104 @@ function confirmSaveScaledSemi(){
   syncToCloud();
   state.scaleCalc = null;
   go('semiList');
+}
+
+/* =========================================================
+   NHÂN TỶ LỆ MÓN THEO SIZE LY — VD công thức gốc ly 500ml, tính
+   ra đúng định mức cho ly 700ml/1000ml theo tỷ lệ, không cần tự
+   bấm máy tính. Vì không lưu sẵn "size" của món, cần hỏi rõ size
+   gốc + size muốn tính mỗi lần dùng.
+========================================================= */
+function openDishScaleCalc(dishId){
+  if(!state.dishes.find(d=>d.id===dishId)) return;
+  state.dishScaleCalc = { dishId, originalSize:'', targetSize:'' };
+  go('dishScaleCalc');
+}
+function renderDishScaleCalc(){
+  const sc = state.dishScaleCalc;
+  const d = sc ? state.dishes.find(x=>x.id===sc.dishId) : null;
+  if(!d) return `<div class="screen"><button class="btn-ghost" onclick="go('menu')">← Quay lại</button><div class="empty-state">Không tìm thấy món</div></div>`;
+  return `
+  <div class="screen">
+    <button class="btn-ghost" onclick="state.dishScaleCalc=null;go('menu')">← Quay lại</button>
+    <h1 class="page-title">Nhân tỷ lệ theo size ly</h1>
+    <p class="page-sub">Món gốc: <b>${d.name}</b> — cost hiện tại ${fmtVND(dishCost(d))}, giá bán đề xuất ${fmtVND(suggestedPrice(d))}.</p>
+    <div class="settings-grid">
+      <div>
+        <label>Size ly công thức gốc (ml)</label>
+        <input type="number" id="dsc_original" value="${sc.originalSize}" placeholder="VD: 500" oninput="updateDishScaleCalc()">
+      </div>
+      <div>
+        <label>Size ly muốn tính (ml)</label>
+        <input type="number" id="dsc_target" value="${sc.targetSize}" placeholder="VD: 700" oninput="updateDishScaleCalc()">
+      </div>
+    </div>
+    <div class="hint" style="margin-top:6px;">Nhập đúng size ly bạn đã dùng khi lên công thức gốc này (nếu không nhớ chính xác, ước lượng gần đúng nhất có thể).</div>
+    <div id="dishScaleResultContainer">${buildDishScaleResult()}</div>
+  </div>`;
+}
+function updateDishScaleCalc(){
+  if(!state.dishScaleCalc) return;
+  state.dishScaleCalc.originalSize = document.getElementById('dsc_original').value;
+  state.dishScaleCalc.targetSize = document.getElementById('dsc_target').value;
+  const c = document.getElementById('dishScaleResultContainer');
+  if(c) c.innerHTML = buildDishScaleResult();
+}
+function buildDishScaleResult(){
+  const sc = state.dishScaleCalc;
+  const d = sc ? state.dishes.find(x=>x.id===sc.dishId) : null;
+  if(!d) return '';
+  const orig = parseFloat(sc.originalSize);
+  const target = parseFloat(sc.targetSize);
+  if(!orig || orig<=0 || !target || target<=0) return `<div class="hint" style="margin-top:14px;">Nhập đủ 2 size để xem kết quả.</div>`;
+  const ratio = target / orig;
+  const scaledComponents = d.components.map(c=>({...c, qty: Math.round(c.qty*ratio*100)/100}));
+  const scaledDish = {components:scaledComponents, opPct:d.opPct, fcPct:d.fcPct};
+  const rows = scaledComponents.map(c=>`<div class="comp-row"><div class="info"><div class="n">${componentName(c)}</div><div class="m">${fmtNum(c.qty)} ${componentUnit(c)} · ${fmtVND(c.qty*componentUnitPrice(c))}</div></div></div>`).join('');
+  const newCost = dishCost(scaledDish);
+  const newPrice = suggestedPrice(scaledDish);
+  const newFc = actualFoodCostPct(scaledDish);
+  return `
+    <div class="price-hero" style="margin-top:16px;">
+      <div class="lbl">Giá bán đề xuất cho ly ${fmtNum(target)}ml</div>
+      <div class="val" style="font-size:28px;">${fmtVND(newPrice)}</div>
+      <span class="fc-badge ${newFc<=0.32?'fc-good':'fc-warn'}">Food cost ${(newFc*100).toFixed(1)}%</span>
+      <div class="card-sub" style="margin-top:6px;">Cost nguyên liệu ${fmtVND(newCost)} · Tỷ lệ ${(ratio*100).toFixed(1)}% so với size gốc</div>
+    </div>
+    <label style="margin-top:6px;">Thành phần đã quy đổi</label>
+    ${rows}
+    <button class="btn btn-outline" style="margin-top:16px;width:100%;" onclick="openSaveScaledDish()">💾 Lưu thành món riêng</button>
+    <div id="saveScaledDishForm"></div>`;
+}
+function openSaveScaledDish(){
+  const sc = state.dishScaleCalc;
+  const d = sc ? state.dishes.find(x=>x.id===sc.dishId) : null;
+  const orig = parseFloat(sc && sc.originalSize), target = parseFloat(sc && sc.targetSize);
+  if(!d || !orig || !target){ toast('⚠️ Nhập đủ 2 size trước'); return; }
+  const container = document.getElementById('saveScaledDishForm');
+  if(!container) return;
+  const defaultName = `${d.name} (ly ${fmtNum(target)}ml)`;
+  container.innerHTML = `
+    <div class="card" style="margin-top:12px;background:var(--cream-deep);">
+      <label style="margin-top:0;">Tên món mới</label>
+      <input type="text" id="scaled_dish_name" value="${defaultName}">
+      <button class="btn btn-primary" style="margin-top:14px;" onclick="confirmSaveScaledDish()">Lưu món này</button>
+    </div>`;
+}
+function confirmSaveScaledDish(){
+  const sc = state.dishScaleCalc;
+  const d = sc ? state.dishes.find(x=>x.id===sc.dishId) : null;
+  const orig = parseFloat(sc && sc.originalSize), target = parseFloat(sc && sc.targetSize);
+  if(!d || !orig || !target) return;
+  const name = document.getElementById('scaled_dish_name').value.trim();
+  if(!name){ toast('⚠️ Nhập tên món mới'); return; }
+  const ratio = target / orig;
+  const newComponents = d.components.map(c=>({ type:c.type, refId:c.refId, qty: Math.round(c.qty*ratio*100)/100 }));
+  state.dishes.push({ id: nextId('MON'), name, components:newComponents, opPct:d.opPct, fcPct:d.fcPct });
+  toast(`✅ Đã lưu "${name}"`);
+  syncToCloud();
+  state.dishScaleCalc = null;
+  go('menu');
 }
 
 /* =========================================================
