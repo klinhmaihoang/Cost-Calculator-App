@@ -175,7 +175,7 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-28-auto-backup';
+const APP_VERSION = '2026-08-28-dish-scale-editable';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -1107,7 +1107,8 @@ function renderGuideScreen(){
 
     ${guideCard('④ Menu &amp; giá bán', `
       Xem lại toàn bộ món đã lưu, giá bán đề xuất, % food cost thực tế (xanh = tốt, đỏ = cao cần xem lại).<br>
-      Bấm <b>🔀</b> để tính nhanh cho size ly khác — nhập size gốc + size muốn tính, app tự nhân tỷ lệ tất cả thành phần.`)}
+      Bấm <b>🔀</b> để tính nhanh cho size ly khác — nhập size gốc + size muốn tính, app tự nhân tỷ lệ các thành phần (trừ bao bì — xem thêm bên dưới), số nào chưa vừa ý thì sửa/làm tròn trực tiếp ngay tại dòng đó.<br>
+      <b>Bao bì (ly, nắp, ống hút...) không tự nhân tỷ lệ</b> — giữ nguyên số lượng vì chỉ dùng 1 bộ/1 cái dù ly to hay nhỏ. Nếu bao bì khác giá theo size (VD ly 500ml và 700ml giá khác nhau), tạo sẵn từng loại riêng trong Nguyên liệu, rồi ở dòng bao bì đó dùng ô "Đổi sang bao bì khác" để chọn đúng loại cho size mới.`)}
 
     ${guideCard('📝 Công thức thử nghiệm', `
       Dùng khi đang thử món, chỉ cần ghi lại nguyên liệu + cách làm, <b>chưa cần tính cost ngay</b>. Khi nào sẵn sàng, bấm <b>💰 Chuyển thành món để tính cost</b> — app tự đọc từng dòng, gợi ý khớp với nguyên liệu/công thức nền đã có, xác nhận là xong.<br>
@@ -2516,7 +2517,7 @@ function confirmSaveScaledSemi(){
 ========================================================= */
 function openDishScaleCalc(dishId){
   if(!state.dishes.find(d=>d.id===dishId)) return;
-  state.dishScaleCalc = { dishId, originalSize:'', targetSize:'' };
+  state.dishScaleCalc = { dishId, originalSize:'', targetSize:'', rows:null };
   go('dishScaleCalc');
 }
 function renderDishScaleCalc(){
@@ -2538,48 +2539,98 @@ function renderDishScaleCalc(){
         <input type="number" id="dsc_target" value="${sc.targetSize}" placeholder="VD: 700" oninput="updateDishScaleCalc()">
       </div>
     </div>
-    <div class="hint" style="margin-top:6px;">Nhập đúng size ly bạn đã dùng khi lên công thức gốc này (nếu không nhớ chính xác, ước lượng gần đúng nhất có thể).</div>
+    <div class="hint" style="margin-top:6px;">Nguyên liệu nhóm "Bao bì" (ly, nắp, ống hút...) sẽ KHÔNG bị nhân tỷ lệ, tự giữ nguyên số lượng — bạn có thể đổi sang đúng loại bao bì cho size mới ở từng dòng bên dưới. Các dòng khác đều sửa/làm tròn số được thoải mái.</div>
     <div id="dishScaleResultContainer">${buildDishScaleResult()}</div>
   </div>`;
+}
+function initDishScaleRows(d, ratio){
+  return d.components.map(c=>{
+    const isPackaging = c.type==='ingredient' && (findIngredient(c.refId)||{}).group==='Bao bì';
+    return { type:c.type, refId:c.refId, qty: isPackaging ? c.qty : Math.round(c.qty*ratio*100)/100, isPackaging };
+  });
 }
 function updateDishScaleCalc(){
   if(!state.dishScaleCalc) return;
   state.dishScaleCalc.originalSize = document.getElementById('dsc_original').value;
   state.dishScaleCalc.targetSize = document.getElementById('dsc_target').value;
+  const orig = parseFloat(state.dishScaleCalc.originalSize);
+  const target = parseFloat(state.dishScaleCalc.targetSize);
+  const d = state.dishes.find(x=>x.id===state.dishScaleCalc.dishId);
+  state.dishScaleCalc.rows = (d && orig>0 && target>0) ? initDishScaleRows(d, target/orig) : null;
   const c = document.getElementById('dishScaleResultContainer');
   if(c) c.innerHTML = buildDishScaleResult();
+}
+function buildDishScalePriceHero(){
+  const sc = state.dishScaleCalc;
+  const d = sc ? state.dishes.find(x=>x.id===sc.dishId) : null;
+  if(!d || !sc.rows) return '';
+  const totalCost = sc.rows.reduce((s,r)=>s + r.qty*componentUnitPrice(r), 0);
+  const withOp = totalCost*(1+d.opPct);
+  const newPrice = d.fcPct ? Math.round((withOp/d.fcPct)/1000)*1000 : 0;
+  const newFc = newPrice ? withOp/newPrice : 0;
+  return `
+    <div class="lbl">Giá bán đề xuất cho ly ${fmtNum(parseFloat(sc.targetSize))}ml</div>
+    <div class="val" style="font-size:28px;">${fmtVND(newPrice)}</div>
+    <span class="fc-badge ${newFc<=0.32?'fc-good':'fc-warn'}">Food cost ${(newFc*100).toFixed(1)}%</span>
+    <div class="card-sub" style="margin-top:6px;">Cost nguyên liệu ${fmtVND(totalCost)}</div>`;
 }
 function buildDishScaleResult(){
   const sc = state.dishScaleCalc;
   const d = sc ? state.dishes.find(x=>x.id===sc.dishId) : null;
-  if(!d) return '';
-  const orig = parseFloat(sc.originalSize);
-  const target = parseFloat(sc.targetSize);
-  if(!orig || orig<=0 || !target || target<=0) return `<div class="hint" style="margin-top:14px;">Nhập đủ 2 size để xem kết quả.</div>`;
-  const ratio = target / orig;
-  const scaledComponents = d.components.map(c=>({...c, qty: Math.round(c.qty*ratio*100)/100}));
-  const scaledDish = {components:scaledComponents, opPct:d.opPct, fcPct:d.fcPct};
-  const rows = scaledComponents.map(c=>`<div class="comp-row"><div class="info"><div class="n">${componentName(c)}</div><div class="m">${fmtNum(c.qty)} ${componentUnit(c)} · ${fmtVND(c.qty*componentUnitPrice(c))}</div></div></div>`).join('');
-  const newCost = dishCost(scaledDish);
-  const newPrice = suggestedPrice(scaledDish);
-  const newFc = actualFoodCostPct(scaledDish);
+  if(!d || !sc.rows) return `<div class="hint" style="margin-top:14px;">Nhập đủ 2 size để xem kết quả.</div>`;
+  const bagIngredients = state.ingredients.filter(i=>i.group==='Bao bì');
+  const rowsHtml = sc.rows.map((r,idx)=>{
+    const unit = componentUnit(r);
+    const name = componentName(r);
+    const lineTotal = r.qty * componentUnitPrice(r);
+    const swapControl = r.isPackaging ? `
+      <div style="margin-top:8px;">
+        ${renderSearchSelect('dscRow'+idx, [{label:null, items: bagIngredients.map(i=>({value:i.id, label:`${i.name} (${fmtVND(i.price)})`}))}], {placeholder:'Đổi sang bao bì khác cho size này...', selectedValue:r.refId, selectedLabel:name, onSelect:'dscSwapPackaging'})}
+      </div>` : '';
+    return `
+    <div class="comp-row" style="align-items:flex-start;">
+      <div class="info" style="flex:1;">
+        <div class="n">${name}${r.isPackaging?' <span class="hint" style="display:inline;">— bao bì, giữ nguyên số lượng</span>':''}</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:4px;flex-wrap:wrap;">
+          <input type="number" value="${r.qty}" style="width:90px;padding:8px 10px;border:2px solid var(--line);border-radius:8px;font-size:14px;" oninput="dscUpdateQty(${idx}, this.value)">
+          <span class="hint" style="margin:0;">${unit||''} · <span id="dscLine${idx}">${fmtVND(lineTotal)}</span></span>
+        </div>
+        ${swapControl}
+      </div>
+    </div>`;
+  }).join('');
   return `
-    <div class="price-hero" style="margin-top:16px;">
-      <div class="lbl">Giá bán đề xuất cho ly ${fmtNum(target)}ml</div>
-      <div class="val" style="font-size:28px;">${fmtVND(newPrice)}</div>
-      <span class="fc-badge ${newFc<=0.32?'fc-good':'fc-warn'}">Food cost ${(newFc*100).toFixed(1)}%</span>
-      <div class="card-sub" style="margin-top:6px;">Cost nguyên liệu ${fmtVND(newCost)} · Tỷ lệ ${(ratio*100).toFixed(1)}% so với size gốc</div>
-    </div>
-    <label style="margin-top:6px;">Thành phần đã quy đổi</label>
-    ${rows}
+    <div class="price-hero" id="dscPriceHero" style="margin-top:16px;">${buildDishScalePriceHero()}</div>
+    <label style="margin-top:6px;">Thành phần đã quy đổi — sửa/làm tròn số nếu cần</label>
+    ${rowsHtml}
     <button class="btn btn-outline" style="margin-top:16px;width:100%;" onclick="openSaveScaledDish()">💾 Lưu thành món riêng</button>
     <div id="saveScaledDishForm"></div>`;
 }
+function dscUpdateQty(idx, val){
+  if(!state.dishScaleCalc || !state.dishScaleCalc.rows) return;
+  const qty = parseFloat(val) || 0;
+  state.dishScaleCalc.rows[idx].qty = qty;
+  const row = state.dishScaleCalc.rows[idx];
+  const lineEl = document.getElementById('dscLine'+idx);
+  if(lineEl) lineEl.textContent = fmtVND(qty*componentUnitPrice(row));
+  const heroEl = document.getElementById('dscPriceHero');
+  if(heroEl) heroEl.innerHTML = buildDishScalePriceHero();
+}
+function dscSwapPackaging(id, value){
+  const idx = parseInt(id.replace('dscRow',''), 10);
+  if(!state.dishScaleCalc || !state.dishScaleCalc.rows || isNaN(idx)) return;
+  state.dishScaleCalc.rows[idx].refId = value; // số lượng bao bì giữ nguyên, không đổi theo size
+  const row = state.dishScaleCalc.rows[idx];
+  const lineEl = document.getElementById('dscLine'+idx);
+  if(lineEl) lineEl.textContent = fmtVND(row.qty*componentUnitPrice(row));
+  const heroEl = document.getElementById('dscPriceHero');
+  if(heroEl) heroEl.innerHTML = buildDishScalePriceHero();
+}
 function openSaveScaledDish(){
   const sc = state.dishScaleCalc;
-  const d = sc ? state.dishes.find(x=>x.id===sc.dishId) : null;
-  const orig = parseFloat(sc && sc.originalSize), target = parseFloat(sc && sc.targetSize);
-  if(!d || !orig || !target){ toast('⚠️ Nhập đủ 2 size trước'); return; }
+  if(!sc || !sc.rows){ toast('⚠️ Nhập đủ 2 size trước'); return; }
+  const d = state.dishes.find(x=>x.id===sc.dishId);
+  const target = parseFloat(sc.targetSize);
   const container = document.getElementById('saveScaledDishForm');
   if(!container) return;
   const defaultName = `${d.name} (ly ${fmtNum(target)}ml)`;
@@ -2592,13 +2643,11 @@ function openSaveScaledDish(){
 }
 function confirmSaveScaledDish(){
   const sc = state.dishScaleCalc;
-  const d = sc ? state.dishes.find(x=>x.id===sc.dishId) : null;
-  const orig = parseFloat(sc && sc.originalSize), target = parseFloat(sc && sc.targetSize);
-  if(!d || !orig || !target) return;
+  if(!sc || !sc.rows) return;
+  const d = state.dishes.find(x=>x.id===sc.dishId);
   const name = document.getElementById('scaled_dish_name').value.trim();
   if(!name){ toast('⚠️ Nhập tên món mới'); return; }
-  const ratio = target / orig;
-  const newComponents = d.components.map(c=>({ type:c.type, refId:c.refId, qty: Math.round(c.qty*ratio*100)/100 }));
+  const newComponents = sc.rows.map(r=>({ type:r.type, refId:r.refId, qty:r.qty }));
   state.dishes.push({ id: nextId('MON'), name, components:newComponents, opPct:d.opPct, fcPct:d.fcPct });
   toast(`✅ Đã lưu "${name}"`);
   syncToCloud();
