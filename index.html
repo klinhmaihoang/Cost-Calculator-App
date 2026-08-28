@@ -175,7 +175,7 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-27-serialize-sync';
+const APP_VERSION = '2026-08-27-backup-restore';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -940,6 +940,7 @@ function renderScreenBody(){
     case 'bulkImportReview': return renderBulkImportReview();
     case 'bulkDraftImportForm': return renderBulkDraftImportForm();
     case 'bulkDraftImportReview': return renderBulkDraftImportReview();
+    case 'backupScreen': return renderBackupScreen();
     default: return '';
   }
 }
@@ -1030,6 +1031,11 @@ function renderHome(){
     <button class="home-tile" onclick="go('draftList')">
       <div class="icon">📝</div>
       <div class="txt"><div class="t">Công thức thử nghiệm</div><div class="s">Note nhanh khi đang thử món, chưa cần tính cost — ${state.draftRecipes.length} công thức</div></div>
+    </button>
+
+    <button class="home-tile" onclick="go('backupScreen')">
+      <div class="icon">💾</div>
+      <div class="txt"><div class="t">Sao lưu &amp; Khôi phục</div><div class="s">Tải bản sao lưu về máy — nên làm trước mỗi lần cập nhật app</div></div>
     </button>
   </div>`;
 }
@@ -2323,6 +2329,90 @@ function confirmDraftMatchReview(){
   state.matchReview = null;
   toast(`✅ Đã ghép ${components.length} thành phần — kiểm tra lại rồi tiếp tục`);
   go('dishWizard');
+}
+
+/* =========================================================
+   SAO LƯU / KHÔI PHỤC — tải toàn bộ dữ liệu về máy dưới dạng file
+   .json, độc lập hoàn toàn với Google Sheet. Nên bấm tải trước mỗi
+   lần cập nhật app / tải lại trang, phòng khi có sự cố đồng bộ.
+========================================================= */
+function renderBackupScreen(){
+  return `
+  <div class="screen">
+    <button class="btn-ghost" onclick="go('home')">← Trang chủ</button>
+    <h1 class="page-title">Sao lưu &amp; Khôi phục</h1>
+    <p class="page-sub">Tải file sao lưu về máy trước khi cập nhật app hoặc tải lại trang — nếu lỡ có sự cố mất dữ liệu, dùng file này để khôi phục lại nhanh, không cần nhập tay lại từ đầu.</p>
+    <div class="card">
+      <div class="card-title">💾 Tải bản sao lưu</div>
+      <div class="card-sub" style="margin:6px 0 14px;">Hiện có ${state.ingredients.length} nguyên liệu, ${state.semiRecipes.length} công thức nền, ${state.dishes.length} món, ${state.draftRecipes.length} công thức thử nghiệm.</div>
+      <button class="btn btn-primary" onclick="exportBackup()">Tải xuống file sao lưu (.json)</button>
+    </div>
+    <div class="card">
+      <div class="card-title">📂 Khôi phục từ file sao lưu</div>
+      <div class="card-sub" style="margin:6px 0 14px;">Chọn đúng file .json đã tải về trước đó — sẽ THAY THẾ toàn bộ dữ liệu hiện tại trong app bằng dữ liệu trong file.</div>
+      <input type="file" id="restoreFileInput" accept="application/json,.json" style="display:none;" onchange="handleRestoreFile(event)">
+      <button class="btn btn-outline" onclick="document.getElementById('restoreFileInput').click()">Chọn file để khôi phục</button>
+    </div>
+    <div class="hint" style="margin-top:10px;">Gợi ý: nên tải sao lưu định kỳ (VD trước mỗi lần cập nhật app), lưu file vào nơi dễ tìm lại (Google Drive riêng, gửi email cho chính mình...).</div>
+  </div>`;
+}
+function exportBackup(){
+  const backup = {
+    exportedAt: new Date().toISOString(),
+    appVersion: APP_VERSION,
+    ingredients: state.ingredients,
+    semiRecipes: state.semiRecipes,
+    dishes: state.dishes,
+    draftRecipes: state.draftRecipes,
+  };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const stamp = new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `costapp-backup-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('💾 Đã tải file sao lưu về máy');
+}
+function handleRestoreFile(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    let backup;
+    try{ backup = JSON.parse(e.target.result); }
+    catch(err){ toast('⚠️ Không đọc được file — không đúng định dạng JSON'); return; }
+    if(!Array.isArray(backup.ingredients) && !Array.isArray(backup.dishes)){
+      toast('⚠️ File không đúng định dạng sao lưu của app'); return;
+    }
+    const msg = `Sao lưu lúc: ${backup.exportedAt ? new Date(backup.exportedAt).toLocaleString('vi-VN') : 'không rõ'}
+- ${(backup.ingredients||[]).length} nguyên liệu
+- ${(backup.semiRecipes||[]).length} công thức nền
+- ${(backup.dishes||[]).length} món
+- ${(backup.draftRecipes||[]).length} công thức thử nghiệm
+
+Hiện tại đang có:
+- ${state.ingredients.length} nguyên liệu
+- ${state.semiRecipes.length} công thức nền
+- ${state.dishes.length} món
+- ${state.draftRecipes.length} công thức thử nghiệm
+
+⚠️ Khôi phục sẽ THAY THẾ HOÀN TOÀN dữ liệu hiện tại bằng dữ liệu trong file sao lưu này và tự đồng bộ lên Sheet. Không thể hoàn tác. Tiếp tục?`;
+    if(confirm(msg)){
+      state.ingredients = backup.ingredients||[];
+      state.semiRecipes = backup.semiRecipes||[];
+      state.dishes = backup.dishes||[];
+      state.draftRecipes = backup.draftRecipes||[];
+      toast('✅ Đã khôi phục — đang đồng bộ lên Sheet...');
+      syncToCloud();
+      go('home');
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
 }
 
 /* =========================================================
