@@ -175,7 +175,7 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-28-dish-scale-editable';
+const APP_VERSION = '2026-08-28-fix-false-conflict';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -392,12 +392,16 @@ async function writeAllTabs(sheetId, dataByTab){
   await ensureTabTitles(sheetId); // tự đổi tên tab cũ (tiếng Anh) sang tiếng Việt nếu cần
 
   // QUAN TRỌNG — CHỐNG GHI ĐÈ TỪ NHIỀU TAB/THIẾT BỊ: nếu Sheet đã bị thay đổi bởi
-  // nơi khác (VD 1 tab cũ khác vẫn còn mở, hoặc đăng nhập ở máy khác) kể từ lần
-  // đọc/ghi gần nhất của phiên này, KHÔNG được âm thầm ghi đè — dễ làm mất đúng
-  // phần dữ liệu mới hơn từ nơi kia. Phải hỏi xác nhận trước khi tiếp tục.
-  if(state.user && state.user.lastKnownModifiedTime){
+  // nơi khác kể từ lần đọc/ghi gần nhất, KHÔNG được âm thầm ghi đè. Nhưng CHỈ kiểm
+  // tra khi đã "im lặng" đủ lâu (8 giây) kể từ lần CHÍNH APP NÀY ghi gần nhất —
+  // nếu không, các lệnh ghi liên tiếp nhanh của chính app (VD thêm nhiều nguyên
+  // liệu/công thức dồn dập) sẽ bị hiểu nhầm thành "có nơi khác vừa sửa" do độ trễ
+  // đồng bộ nội bộ của Google, gây cảnh báo giả liên tục rất khó chịu.
+  const quietLongEnough = !state.user || !state.user.lastWriteAt || (Date.now() - state.user.lastWriteAt > 8000);
+  if(state.user && state.user.lastKnownModifiedTime && quietLongEnough){
     const currentModified = await getFileModifiedTime(sheetId);
-    if(currentModified && currentModified !== state.user.lastKnownModifiedTime){
+    const diffMs = currentModified ? Math.abs(new Date(currentModified).getTime() - new Date(state.user.lastKnownModifiedTime).getTime()) : 0;
+    if(currentModified && diffMs > 3000){ // sai khác dưới 3 giây coi như cùng 1 lần ghi, bỏ qua
       const proceed = confirm('⚠️ Phát hiện dữ liệu trên Google Sheet đã bị thay đổi từ nơi khác (có thể do bạn đang mở app ở tab hoặc thiết bị khác) kể từ lần đồng bộ gần nhất tại đây.\n\nNếu tiếp tục lưu từ đây, có thể sẽ ghi đè mất dữ liệu mới hơn từ nơi kia.\n\n✅ Khuyên dùng: bấm Huỷ, rồi tải lại trang này để lấy đúng dữ liệu mới nhất trước khi thao tác tiếp.\n⚠️ Chỉ bấm OK nếu bạn chắc chắn dữ liệu ở ĐÂY mới là bản đúng cần giữ lại.');
       if(!proceed) throw new Error('Đã huỷ lưu do phát hiện xung đột dữ liệu với nơi khác');
     }
@@ -426,7 +430,7 @@ async function writeAllTabs(sheetId, dataByTab){
     body: JSON.stringify({ranges: clearRanges})
   });
   try{ await applySheetStyling(sheetId); }catch(e){ console.error('style error', e); } // không chặn lưu nếu style lỗi
-  if(state.user) state.user.lastKnownModifiedTime = await getFileModifiedTime(sheetId); // cập nhật mốc sau khi ghi xong thành công
+  if(state.user){ state.user.lastKnownModifiedTime = await getFileModifiedTime(sheetId); state.user.lastWriteAt = Date.now(); } // cập nhật mốc sau khi ghi xong thành công
 }
 async function readAllTabs(sheetId){
   await ensureTabTitles(sheetId); // tự đổi tên tab cũ nếu cần, trước khi đọc theo tên mới
