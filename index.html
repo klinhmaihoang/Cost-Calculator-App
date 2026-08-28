@@ -1441,13 +1441,14 @@ function renderSemiWizard(){
     body = `
       <div class="card">
         <label style="margin-top:0;">Nguyên liệu</label>
-        ${renderSearchSelect('w_ing', [{label:null, items: state.ingredients.map(i=>({value:i.id, label:`${i.name} (${i.baseUnit})`}))}], {placeholder:'Gõ tên nguyên liệu để tìm...', onSelect:'srUpdateSemiUnitBadge'})}
+        ${renderSearchSelect('w_ing', [{label:null, items: state.ingredients.map(i=>({value:i.id, label:`${i.name} (${i.baseUnit})`}))}], {placeholder:'Gõ tên nguyên liệu để tìm...', onSelect:'wizardTrackCompSelection', selectedValue: w.pendingSelValue||'', selectedLabel: w.pendingSelLabel||''})}
         <label>Định mức cho cả mẻ</label>
         <div style="display:flex;gap:10px;align-items:center;">
-          <input type="number" id="w_qty" placeholder="200" style="flex:1;" onkeydown="if(event.key==='Enter') addSemiComponent()">
-          <span class="unit-badge" id="w_unitBadge">${state.ingredients[0]?state.ingredients[0].baseUnit:''}</span>
+          <input type="number" id="w_qty" value="${w.pendingQty||''}" placeholder="200" style="flex:1;" oninput="wizardTrackQtyInput(this.value)" onkeydown="if(event.key==='Enter') addSemiComponent()">
+          <span class="unit-badge" id="w_unitBadge">${(findIngredient(w.pendingSelValue)||state.ingredients[0]||{}).baseUnit||''}</span>
         </div>
         <button class="btn btn-outline btn-sm" style="margin-top:14px;" onclick="addSemiComponent()">+ Thêm vào công thức</button>
+        ${renderWizardQuickAddBlock()}
       </div>
       ${list}
       <div class="card-sub" style="margin:10px 0 4px;">Tổng cost mẻ hiện tại: <b>${fmtVND(totalSoFar)}</b></div>
@@ -1502,11 +1503,83 @@ function srUpdateSemiUnitBadge(id, value){
   const badge = document.getElementById('w_unitBadge');
   if(ing && badge) badge.textContent = ing.baseUnit;
 }
+/* ---- theo dõi lựa chọn/định mức đang gõ dở trong wizard, để giữ lại khi mở/đóng
+   ô "tạo nguyên liệu mới tại chỗ" (tránh phải render lại mất trạng thái) ---- */
+function wizardTrackCompSelection(id, value){
+  if(!state.wizard) return;
+  state.wizard.pendingSelValue = value;
+  const inputEl = document.getElementById('sr_input_'+id);
+  state.wizard.pendingSelLabel = inputEl ? inputEl.value : '';
+  if(id==='w_ing') srUpdateSemiUnitBadge(id, value);
+}
+function wizardTrackQtyInput(val){
+  if(state.wizard) state.wizard.pendingQty = val;
+}
+function renderWizardQuickAddBlock(){
+  if(!state.wizard || !state.wizard.quickAddOpen){
+    return `<button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="wizardOpenQuickAdd()">🆕 Chưa có nguyên liệu này? Tạo mới ngay</button>`;
+  }
+  return `
+    <div class="card" style="margin-top:10px;background:var(--cream-deep);">
+      <label style="margin-top:0;">Tên nguyên liệu mới</label>
+      <input type="text" id="wq_name" placeholder="VD: Sữa dừa">
+      <label>Nhóm</label>
+      <select id="wq_group">${GROUPS.map(g=>`<option value="${g}">${g}</option>`).join('')}</select>
+      <label>Quy cách mua (VD: Túi 500g)</label>
+      <input type="text" id="wq_buyUnit" placeholder="Túi 500g">
+      <div class="settings-grid" style="margin-top:12px;">
+        <div>
+          <label>Số lượng/quy cách</label>
+          <input type="number" id="wq_packQty" placeholder="500">
+        </div>
+        <div>
+          <label>Đơn vị tính</label>
+          <input type="text" id="wq_baseUnit" list="wizardUnitOptions" value="g">
+        </div>
+      </div>
+      <datalist id="wizardUnitOptions">
+        <option value="g"><option value="kg"><option value="ml"><option value="lít">
+        <option value="cái"><option value="quả"><option value="lát"><option value="gói">
+      </datalist>
+      <label>Giá mua (VNĐ)</label>
+      <input type="number" id="wq_price" placeholder="0 nếu miễn phí">
+      <div class="btn-row" style="margin-top:14px;">
+        <button class="btn btn-outline" onclick="wizardCancelQuickAdd()">Huỷ</button>
+        <button class="btn btn-primary" onclick="wizardSaveQuickAddIngredient()">Lưu &amp; chọn luôn</button>
+      </div>
+    </div>`;
+}
+function wizardOpenQuickAdd(){ if(state.wizard){ state.wizard.quickAddOpen = true; render(); } }
+function wizardCancelQuickAdd(){ if(state.wizard){ state.wizard.quickAddOpen = false; render(); } }
+function wizardSaveQuickAddIngredient(){
+  const name = document.getElementById('wq_name').value.trim();
+  const group = document.getElementById('wq_group').value;
+  const buyUnit = document.getElementById('wq_buyUnit').value.trim() || '—';
+  const packQty = parseFloat(document.getElementById('wq_packQty').value);
+  const baseUnit = document.getElementById('wq_baseUnit').value.trim();
+  const priceRaw = document.getElementById('wq_price').value;
+  const price = parseFloat(priceRaw);
+  if(!name || !packQty || !baseUnit || priceRaw===''|| isNaN(price)){ toast('⚠️ Vui lòng nhập đủ thông tin nguyên liệu'); return; }
+  const newIng = {id: nextId('NL'), name, group, buyUnit, packQty, baseUnit, price};
+  state.ingredients.push(newIng);
+  state.wizard.quickAddOpen = false;
+  if(state.screen==='dishWizard'){
+    state.wizard.pendingSelValue = `ingredient:${newIng.id}`;
+    state.wizard.pendingSelLabel = `${newIng.name} (${newIng.baseUnit})`;
+  } else {
+    state.wizard.pendingSelValue = newIng.id;
+    state.wizard.pendingSelLabel = `${newIng.name} (${newIng.baseUnit})`;
+  }
+  toast(`✅ Đã tạo "${name}" và chọn vào ô thành phần`);
+  syncToCloud();
+  render();
+}
 function addSemiComponent(){
   const ingId = document.getElementById('sr_value_w_ing').value;
   const qty = parseFloat(document.getElementById('w_qty').value);
   if(!ingId){ toast('⚠️ Chọn nguyên liệu'); return; }
   if(!qty){ toast('⚠️ Nhập định mức'); return; }
+  state.wizard.pendingSelValue=''; state.wizard.pendingSelLabel=''; state.wizard.pendingQty='';
   state.wizard.components.push({ingredientId:ingId, qty});
   render();
 }
@@ -1572,10 +1645,11 @@ function renderDishWizard(){
         ${renderSearchSelect('w_comp', [
           {label:'Bán thành phẩm', items: state.semiRecipes.map(s=>({value:`semi:${s.id}`, label:`⭐ ${s.name} (${s.yieldUnit})`}))},
           {label:'Nguyên liệu thô', items: state.ingredients.map(i=>({value:`ingredient:${i.id}`, label:`${i.name} (${i.baseUnit})`}))}
-        ], {placeholder:'Gõ tên thành phần để tìm...'})}
+        ], {placeholder:'Gõ tên thành phần để tìm...', onSelect:'wizardTrackCompSelection', selectedValue: w.pendingSelValue||'', selectedLabel: w.pendingSelLabel||''})}
         <label>Định mức sử dụng</label>
-        <input type="number" id="w_qty" placeholder="50" onkeydown="if(event.key==='Enter') addDishComponent()">
+        <input type="number" id="w_qty" value="${w.pendingQty||''}" placeholder="50" oninput="wizardTrackQtyInput(this.value)" onkeydown="if(event.key==='Enter') addDishComponent()">
         <button class="btn btn-outline btn-sm" style="margin-top:14px;" onclick="addDishComponent()">+ Thêm vào món</button>
+        ${renderWizardQuickAddBlock()}
       </div>
       ${list || '<div class="hint">Chưa có thành phần nào — thêm ở trên.</div>'}
       <div class="card-sub" style="margin:10px 0 4px;">Cost nguyên liệu hiện tại: <b>${fmtVND(cost)}</b></div>
@@ -1643,6 +1717,7 @@ function addDishComponent(){
   if(!raw){ toast('⚠️ Chọn thành phần'); return; }
   if(!qty){ toast('⚠️ Nhập định mức'); return; }
   const [type, refId] = raw.split(':');
+  state.wizard.pendingSelValue=''; state.wizard.pendingSelLabel=''; state.wizard.pendingQty='';
   state.wizard.components.push({type, refId, qty});
   render();
 }
