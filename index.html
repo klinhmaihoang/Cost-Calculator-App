@@ -175,7 +175,7 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-27-safe-write-order';
+const APP_VERSION = '2026-08-27-serialize-sync';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -570,20 +570,40 @@ async function loginMhkl(){
     console.error(err);
   }
 }
+let syncInFlight = null;  // Promise của lượt đồng bộ đang chạy, nếu có
+let syncQueued = false;   // có yêu cầu đồng bộ khác đang chờ vì lúc đó đang bận
 async function syncToCloud(){
   if(!state.user) return;
   if(state.user.method==='google' && GOOGLE_DEMO) return;
   if(state.user.method==='mhkl' && MHKL_DEMO) return;
-  try{
-    if(state.user.method==='google'){
-      await writeAllTabs(state.user.sheetId, stateToTabs());
-    } else {
-      await callAppsScript({action:'save', token: state.user.token, data: stateToTabs()});
+
+  // QUAN TRỌNG: nếu đang có 1 lượt đồng bộ khác chạy dở, TUYỆT ĐỐI không chạy
+  // chồng lên — 2 lệnh lưu chạy song song có thể "đua nhau" ghi đè lẫn nhau,
+  // lệnh cũ hơn (ít dữ liệu hơn) hoàn tất SAU sẽ xoá mất dữ liệu của lệnh mới
+  // hơn. Thay vào đó, chỉ đánh dấu "cần đồng bộ lại" rồi đợi lượt hiện tại
+  // xong mới chạy tiếp — luôn lấy đúng dữ liệu MỚI NHẤT tại thời điểm chạy.
+  if(syncInFlight){ syncQueued = true; return; }
+
+  syncInFlight = (async()=>{
+    try{
+      if(state.user.method==='google'){
+        await writeAllTabs(state.user.sheetId, stateToTabs());
+      } else {
+        await callAppsScript({action:'save', token: state.user.token, data: stateToTabs()});
+      }
+      toast('☁️ Đã đồng bộ vào Google Sheet của bạn');
+    }catch(err){
+      toast('⚠️ Đồng bộ thất bại — dữ liệu vẫn được giữ trên máy, thử lại sau');
+      console.error(err);
     }
-    toast('☁️ Đã đồng bộ vào Google Sheet của bạn');
-  }catch(err){
-    toast('⚠️ Đồng bộ thất bại — dữ liệu vẫn được giữ trên máy, thử lại sau');
-    console.error(err);
+  })();
+
+  await syncInFlight;
+  syncInFlight = null;
+
+  if(syncQueued){
+    syncQueued = false;
+    await syncToCloud(); // chạy thêm 1 lượt nữa với dữ liệu mới nhất
   }
 }
 
