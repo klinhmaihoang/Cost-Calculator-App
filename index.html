@@ -175,7 +175,7 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-28-conflict-guard-guide';
+const APP_VERSION = '2026-08-28-auto-backup';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -552,6 +552,7 @@ async function afterGoogleLogin(){
     hideFullLoading();
     toast(isNew ? '✅ Đã tạo Sheet dữ liệu trong Drive của bạn' : '✅ Đã tải dữ liệu từ Sheet của bạn');
     go('home');
+    autoBackupIfNeeded(); // chạy ngầm, không cần đợi — âm thầm tạo sao lưu hôm nay nếu chưa có
   }catch(err){
     hideFullLoading();
     toast('⚠️ Lỗi kết nối Google Sheets, thử lại sau');
@@ -1055,7 +1056,7 @@ function renderHome(){
       <div class="txt"><div class="t">Công thức thử nghiệm</div><div class="s">Note nhanh khi đang thử món, chưa cần tính cost — ${state.draftRecipes.length} công thức</div></div>
     </button>
 
-    <button class="home-tile" onclick="go('backupScreen')">
+    <button class="home-tile" onclick="openBackupScreen()">
       <div class="icon">💾</div>
       <div class="txt"><div class="t">Sao lưu &amp; Khôi phục</div><div class="s">Tải bản sao lưu về máy — nên làm trước mỗi lần cập nhật app</div></div>
     </button>
@@ -1114,11 +1115,11 @@ function renderGuideScreen(){
 
     ${guideCard('💾 Sao lưu &amp; Khôi phục — RẤT QUAN TRỌNG', `
       Tải file <code>.json</code> chứa toàn bộ dữ liệu về máy — hoàn toàn độc lập với Google Sheet, không phụ thuộc mạng hay lỗi đồng bộ.<br>
-      <b>Nên bấm sao lưu:</b><br>
-      • Mỗi ngày sau khi nhập liệu xong, hoặc<br>
-      • Trước khi thoát app / đóng trình duyệt, hoặc<br>
-      • Trước mỗi lần app được cập nhật phiên bản mới (quan trọng nhất)<br>
-      Nếu lỡ có sự cố mất dữ liệu, vào lại mục này, bấm "Chọn file để khôi phục" và chọn đúng file sao lưu gần nhất — không cần nhập tay lại từ đầu.`)}
+      <b>Ngoài ra, đăng nhập Google còn tự động sao lưu ngầm mỗi lần bạn mở app</b> (tối đa 1 bản/ngày, giữ lại 30 ngày) — không cần bấm gì, xem lại ở đúng mục này.<br>
+      <b>Vẫn nên tự bấm tải thêm file .json về máy:</b><br>
+      • Trước mỗi lần app được cập nhật phiên bản mới (quan trọng nhất — sao lưu tự động chỉ chạy SAU khi đăng nhập, chưa kịp bảo vệ đúng thời điểm cập nhật)<br>
+      • Mỗi ngày sau khi nhập liệu xong, hoặc trước khi thoát app<br>
+      Nếu lỡ có sự cố mất dữ liệu, vào lại mục này, chọn bản sao lưu tự động gần nhất hoặc file đã tải để khôi phục — không cần nhập tay lại từ đầu.`)}
 
     ${guideCard('🔒 Bảo mật dữ liệu', `
       Đăng nhập Google: dữ liệu nằm trong Drive riêng của bạn, chỉ mình bạn truy cập được.<br>
@@ -2611,6 +2612,18 @@ function confirmSaveScaledDish(){
    lần cập nhật app / tải lại trang, phòng khi có sự cố đồng bộ.
 ========================================================= */
 function renderBackupScreen(){
+  const isGoogle = state.user && state.user.method==='google';
+  const autoList = state.autoBackupsList || [];
+  const autoRows = autoList.map(f=>`
+    <div class="card">
+      <div class="card-row">
+        <div>
+          <div class="card-title">${new Date(f.createdTime).toLocaleDateString('vi-VN')}</div>
+          <div class="card-sub">${new Date(f.createdTime).toLocaleTimeString('vi-VN')}</div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="restoreFromAutoBackup('${f.id}')">Khôi phục</button>
+      </div>
+    </div>`).join('') || `<div class="empty-state" style="padding:20px;">Chưa có bản sao lưu tự động nào</div>`;
   return `
   <div class="screen">
     <button class="btn-ghost" onclick="go('home')">← Trang chủ</button>
@@ -2627,8 +2640,85 @@ function renderBackupScreen(){
       <input type="file" id="restoreFileInput" accept="application/json,.json" style="display:none;" onchange="handleRestoreFile(event)">
       <button class="btn btn-outline" onclick="document.getElementById('restoreFileInput').click()">Chọn file để khôi phục</button>
     </div>
+    ${isGoogle ? `
+    <div class="card">
+      <div class="card-title">🤖 Sao lưu tự động</div>
+      <div class="card-sub" style="margin:6px 0 14px;">App tự tạo 1 bản sao lưu trong Drive của bạn mỗi khi bạn mở app (tối đa 1 bản/ngày), giữ lại 30 ngày gần nhất — không cần bấm gì cả.</div>
+      ${autoRows}
+    </div>` : `<div class="hint">Sao lưu tự động hiện chỉ áp dụng cho luồng đăng nhập Google.</div>`}
     <div class="hint" style="margin-top:10px;">Gợi ý: nên tải sao lưu định kỳ (VD trước mỗi lần cập nhật app), lưu file vào nơi dễ tìm lại (Google Drive riêng, gửi email cho chính mình...).</div>
   </div>`;
+}
+async function openBackupScreen(){
+  if(state.user && state.user.method==='google'){
+    showFullLoading('Đang tải danh sách sao lưu...');
+    state.autoBackupsList = await listAutoBackups();
+    hideFullLoading();
+  }
+  go('backupScreen');
+}
+async function listAutoBackups(){
+  try{
+    const q = encodeURIComponent("appProperties has { key='app' and value='tdh_cost_app_backup' } and trashed=false");
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,createdTime)&orderBy=createdTime desc`, {headers:{Authorization:'Bearer '+accessToken}});
+    const json = await res.json();
+    return json.files||[];
+  }catch(e){ return []; }
+}
+async function restoreFromAutoBackup(fileId){
+  try{
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {headers:{Authorization:'Bearer '+accessToken}});
+    const backup = await res.json();
+    if(!Array.isArray(backup.ingredients) && !Array.isArray(backup.dishes)){ toast('⚠️ File sao lưu không đúng định dạng'); return; }
+    const msg = `Khôi phục từ bản sao lưu lúc ${backup.exportedAt?new Date(backup.exportedAt).toLocaleString('vi-VN'):'không rõ'}?\n\n- ${(backup.ingredients||[]).length} nguyên liệu\n- ${(backup.semiRecipes||[]).length} công thức nền\n- ${(backup.dishes||[]).length} món\n- ${(backup.draftRecipes||[]).length} công thức thử nghiệm\n\n⚠️ Sẽ THAY THẾ toàn bộ dữ liệu hiện tại. Tiếp tục?`;
+    if(confirm(msg)){
+      state.ingredients = backup.ingredients||[];
+      state.semiRecipes = backup.semiRecipes||[];
+      state.dishes = backup.dishes||[];
+      state.draftRecipes = backup.draftRecipes||[];
+      toast('✅ Đã khôi phục — đang đồng bộ lên Sheet...');
+      syncToCloud();
+      go('home');
+    }
+  }catch(e){ toast('⚠️ Không tải được file sao lưu'); console.error(e); }
+}
+async function autoBackupIfNeeded(){
+  if(!state.user || state.user.method!=='google') return; // chỉ áp dụng luồng Google (Drive riêng)
+  try{
+    const today = new Date().toISOString().slice(0,10);
+    const q = encodeURIComponent(`appProperties has { key='app' and value='tdh_cost_app_backup' } and appProperties has { key='date' and value='${today}' } and trashed=false`);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`, {headers:{Authorization:'Bearer '+accessToken}});
+    const json = await res.json();
+    if(json.files && json.files.length) return; // đã có bản sao lưu hôm nay rồi, khỏi tạo thêm
+
+    const backup = {
+      exportedAt: new Date().toISOString(), appVersion: APP_VERSION, autoBackup: true,
+      ingredients: state.ingredients, semiRecipes: state.semiRecipes,
+      dishes: state.dishes, draftRecipes: state.draftRecipes,
+    };
+    const metadata = { name: `CostApp - Sao lưu tự động - ${today}.json`, mimeType:'application/json', appProperties:{ app:'tdh_cost_app_backup', date: today } };
+    const boundary = '-------costapp' + Date.now();
+    const body =
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`+
+      `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(backup)}\r\n`+
+      `--${boundary}--`;
+    await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      method:'POST', headers:{ Authorization:'Bearer '+accessToken, 'Content-Type': `multipart/related; boundary=${boundary}` }, body
+    });
+    cleanupOldAutoBackups(); // không cần đợi, chạy nền
+  }catch(e){ console.error('auto backup error', e); } // im lặng, tuyệt đối không làm phiền người dùng nếu lỗi
+}
+async function cleanupOldAutoBackups(){
+  try{
+    const q = encodeURIComponent("appProperties has { key='app' and value='tdh_cost_app_backup' } and trashed=false");
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,createdTime)&orderBy=createdTime desc`, {headers:{Authorization:'Bearer '+accessToken}});
+    const json = await res.json();
+    const keep = 30; // giữ lại tối đa 30 bản gần nhất
+    const toDelete = (json.files||[]).slice(keep);
+    for(const f of toDelete){
+      await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, { method:'PATCH', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'}, body: JSON.stringify({trashed:true}) });
+    }
+  }catch(e){ console.error('cleanup backups error', e); }
 }
 function exportBackup(){
   const backup = {
