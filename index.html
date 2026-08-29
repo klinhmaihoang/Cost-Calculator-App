@@ -175,7 +175,7 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-29-free-yield-unit';
+const APP_VERSION = '2026-08-29-semi-in-semi';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -189,7 +189,7 @@ console.log('CostApp phiên bản:', APP_VERSION);
 const TABS = {
   Ingredients: ['id','name','group','buyUnit','packQty','baseUnit','price'],
   SemiRecipes: ['id','name','yieldQty','yieldUnit'],
-  SemiComponents: ['id','semiId','ingredientId','semiName','ingredientName','qty','unitPrice','unit'],
+  SemiComponents: ['id','semiId','refId','type','semiName','componentName','typeLabel','qty','unitPrice','unit'],
   Dishes: ['id','name','opPct','fcPct','cost','suggestedPrice','actualFcPct'],
   DishComponents: ['id','dishId','refId','type','dishName','componentName','typeLabel','qty','unitPrice','unit'],
   DraftRecipes: ['id','name','ingredientsText','stepsText','createdAt'],
@@ -202,12 +202,12 @@ const TABS = {
 const VI_HEADERS = {
   Ingredients: ['Mã','Tên nguyên liệu','Nhóm','Quy cách mua','Số lượng/quy cách','Đơn vị tính','Giá mua (VNĐ)'],
   SemiRecipes: ['Mã','Tên bán thành phẩm','Sản lượng','Đơn vị sản lượng'],
-  SemiComponents: ['Mã','Mã bán thành phẩm','Mã nguyên liệu','Tên bán thành phẩm','Tên nguyên liệu','Định mức','Đơn giá','Đơn vị tính'],
+  SemiComponents: ['Mã','Mã bán thành phẩm','Mã thành phần','Loại (mã hệ thống)','Tên bán thành phẩm','Tên thành phần','Loại','Định mức','Đơn giá','Đơn vị tính'],
   Dishes: ['Mã','Tên món','% Chi phí vận hành','% Food cost mục tiêu','Chi phí nguyên liệu','Giá bán đề xuất','% Food cost thực tế'],
   DishComponents: ['Mã','Mã món','Mã thành phần','Loại (mã hệ thống)','Tên món','Tên thành phần','Loại','Định mức','Đơn giá','Đơn vị tính'],
   DraftRecipes: ['Mã','Tên món/công thức','Nguyên liệu / Công thức','Cách làm','Ngày tạo'],
 };
-const CURRENCY_COLS = { Ingredients: [7], SemiComponents: [7], DishComponents: [9], Dishes: [5, 6] };
+const CURRENCY_COLS = { Ingredients: [7], SemiComponents: [9], DishComponents: [9], Dishes: [5, 6] };
 const PERCENT_COLS = { Dishes: [3, 4, 7] };
 const TAB_TITLES = {
   Ingredients: 'Nguyên liệu',
@@ -230,6 +230,12 @@ Object.keys(TABS).forEach(tab=>{
     if(viLabel) HEADER_TO_KEY[tab][viLabel] = key;
   });
 });
+// Alias tương thích ngược: SemiComponents trước đây chỉ có "Mã nguyên liệu"/"Tên
+// nguyên liệu" (luôn là nguyên liệu thô, chưa hỗ trợ công thức nền lồng nhau).
+// Map các header cũ này vào đúng key mới (refId/componentName) để Sheet cũ vẫn
+// đọc đúng, không bị mất dữ liệu khi nâng cấp lên bản hỗ trợ công thức nền lồng.
+HEADER_TO_KEY.SemiComponents['Mã nguyên liệu'] = 'refId';
+HEADER_TO_KEY.SemiComponents['Tên nguyên liệu'] = 'componentName';
 
 let accessToken = null;   // token OAuth của học viên đăng nhập Google
 let tokenClient = null;
@@ -253,14 +259,11 @@ function stateToTabs(){
   return {
     Ingredients: state.ingredients.map(i=>({id:i.id,name:i.name,group:i.group,buyUnit:i.buyUnit,packQty:i.packQty,baseUnit:i.baseUnit,price:i.price})),
     SemiRecipes: state.semiRecipes.map(s=>({id:s.id,name:s.name,yieldQty:s.yieldQty,yieldUnit:s.yieldUnit})),
-    SemiComponents: state.semiRecipes.flatMap(s=>s.components.map((c,idx)=>{
-      const ing = findIngredient(c.ingredientId);
-      return {
-        id:s.id+'_c'+idx, semiId:s.id, ingredientId:c.ingredientId,
-        semiName:s.name, ingredientName: ing?ing.name:'(đã xoá)',
-        qty:c.qty, unitPrice: ing?ingredientUnitPrice(ing):0, unit: ing?ing.baseUnit:''
-      };
-    })),
+    SemiComponents: state.semiRecipes.flatMap(s=>s.components.map((c,idx)=>({
+      id:s.id+'_c'+idx, semiId:s.id, refId:c.refId, type:c.type,
+      semiName:s.name, componentName: componentName(c), typeLabel: c.type==='semi' ? 'Công thức nền khác' : 'Nguyên liệu thô',
+      qty:c.qty, unitPrice: componentUnitPrice(c), unit: componentUnit(c)
+    }))),
     Dishes: state.dishes.map(d=>({
       id:d.id, name:d.name, opPct:d.opPct, fcPct:d.fcPct,
       cost: dishCost(d), suggestedPrice: suggestedPrice(d), actualFcPct: actualFoodCostPct(d)
@@ -276,7 +279,12 @@ function stateToTabs(){
 function tabsToState(tabs){
   state.ingredients = (tabs.Ingredients||[]).map(r=>({id:String(r.id), name:r.name, group:r.group, buyUnit:r.buyUnit, packQty:Number(r.packQty), baseUnit:r.baseUnit, price:Number(r.price)}));
   const semiComps = {};
-  (tabs.SemiComponents||[]).forEach(r=>{ (semiComps[r.semiId] = semiComps[r.semiId]||[]).push({ingredientId:String(r.ingredientId), qty:Number(r.qty)}); });
+  (tabs.SemiComponents||[]).forEach(r=>{
+    // dữ liệu cũ trước khi hỗ trợ công thức nền lồng nhau không có cột "type" —
+    // mặc định luôn là 'ingredient' (đúng hành vi cũ) nếu thiếu.
+    const type = r.type || 'ingredient';
+    (semiComps[r.semiId] = semiComps[r.semiId]||[]).push({type, refId:String(r.refId), qty:Number(r.qty)});
+  });
   state.semiRecipes = (tabs.SemiRecipes||[]).map(r=>({id:String(r.id), name:r.name, yieldQty:Number(r.yieldQty), yieldUnit:r.yieldUnit, components: semiComps[r.id]||[]}));
   const dishComps = {};
   (tabs.DishComponents||[]).forEach(r=>{ (dishComps[r.dishId] = dishComps[r.dishId]||[]).push({type:r.type, refId:String(r.refId), qty:Number(r.qty)}); });
@@ -697,8 +705,8 @@ const state = {
     {id:'i10', name:'Nước lọc', group:'Nguyên liệu nền', buyUnit:'Bình 20L', packQty:20000, baseUnit:'ml', price:15000},
   ],
   semiRecipes: [
-    {id:'s1', name:'Cà phê nền', components:[{ingredientId:'i9',qty:200},{ingredientId:'i10',qty:2000}], yieldQty:1700, yieldUnit:'ml'},
-    {id:'s2', name:'Trà đen nền', components:[{ingredientId:'i1',qty:40},{ingredientId:'i10',qty:2000}], yieldQty:1900, yieldUnit:'ml'},
+    {id:'s1', name:'Cà phê nền', components:[{type:'ingredient',refId:'i9',qty:200},{type:'ingredient',refId:'i10',qty:2000}], yieldQty:1700, yieldUnit:'ml'},
+    {id:'s2', name:'Trà đen nền', components:[{type:'ingredient',refId:'i1',qty:40},{type:'ingredient',refId:'i10',qty:2000}], yieldQty:1900, yieldUnit:'ml'},
   ],
   dishes: [
     {id:'d1', name:'Cà phê đen đá', opPct:0.15, fcPct:0.30,
@@ -733,17 +741,17 @@ function ingredientUnitPrice(ing){ return ing.packQty ? ing.price / ing.packQty 
 function findIngredient(id){ return state.ingredients.find(x=>x.id===id); }
 function findSemi(id){ return state.semiRecipes.find(x=>x.id===id); }
 
-function semiTotalCost(semi){
-  return semi.components.reduce((sum,c)=>{
-    const ing = findIngredient(c.ingredientId);
-    return sum + (ing ? c.qty * ingredientUnitPrice(ing) : 0);
-  },0);
+function semiTotalCost(semi, visited){
+  visited = visited || new Set();
+  if(!semi || visited.has(semi.id)) return 0; // an toàn: chặn vòng lặp bất thường, không nên xảy ra vì đã chặn lúc thêm thành phần
+  visited.add(semi.id);
+  return semi.components.reduce((sum,c)=>sum + c.qty*componentUnitPrice(c, visited), 0);
 }
-function semiUnitPrice(semi){ return semi.yieldQty ? semiTotalCost(semi)/semi.yieldQty : 0; }
+function semiUnitPrice(semi, visited){ return semi && semi.yieldQty ? semiTotalCost(semi, visited)/semi.yieldQty : 0; }
 
-function componentUnitPrice(c){
+function componentUnitPrice(c, visited){
   if(c.type==='ingredient'){ const ing=findIngredient(c.refId); return ing?ingredientUnitPrice(ing):0; }
-  const semi=findSemi(c.refId); return semi?semiUnitPrice(semi):0;
+  const semi=findSemi(c.refId); return semi?semiUnitPrice(semi, visited):0;
 }
 function componentUnit(c){
   if(c.type==='ingredient'){ const ing=findIngredient(c.refId); return ing?ing.baseUnit:''; }
@@ -756,6 +764,23 @@ function componentGroup(c){
 function componentName(c){
   if(c.type==='ingredient'){ const ing=findIngredient(c.refId); return ing?ing.name:'(đã xoá)'; }
   const semi=findSemi(c.refId); return semi?semi.name:'(đã xoá)';
+}
+// Kiểm tra xem công thức nền `semiId` có (trực tiếp hoặc gián tiếp qua nhiều lớp)
+// dùng lại `targetId` hay không — dùng để CHẶN việc tạo vòng lặp (A dùng B, B lại
+// dùng A) trước khi cho thêm 1 công thức nền làm thành phần của công thức khác.
+function semiReferencesTarget(semiId, targetId, visited){
+  visited = visited || new Set();
+  if(visited.has(semiId)) return false;
+  visited.add(semiId);
+  const semi = findSemi(semiId);
+  if(!semi) return false;
+  for(const c of semi.components){
+    if(c.type==='semi'){
+      if(c.refId===targetId) return true;
+      if(semiReferencesTarget(c.refId, targetId, visited)) return true;
+    }
+  }
+  return false;
 }
 function dishCost(dish){
   return dish.components.reduce((sum,c)=>sum + c.qty*componentUnitPrice(c),0);
@@ -1256,7 +1281,7 @@ function shortenAllIds(){
   state.ingredients.forEach(i=>{ i.id = idMap[i.id]; });
   state.semiRecipes.forEach(s=>{
     s.id = idMap[s.id];
-    s.components.forEach(c=>{ if(idMap[c.ingredientId]) c.ingredientId = idMap[c.ingredientId]; });
+    s.components.forEach(c=>{ if(idMap[c.refId]) c.refId = idMap[c.refId]; });
   });
   state.dishes.forEach(d=>{
     d.id = idMap[d.id];
@@ -1271,7 +1296,7 @@ function shortenAllIds(){
 function editIngredient(id){ state.editIngredientId = id; go('ingredientForm'); }
 
 function findIngredientUsage(id){
-  const semiNames = state.semiRecipes.filter(s=>s.components.some(c=>c.ingredientId===id)).map(s=>s.name);
+  const semiNames = state.semiRecipes.filter(s=>s.components.some(c=>c.type==='ingredient'&&c.refId===id)).map(s=>s.name);
   const dishNames = state.dishes.filter(d=>d.components.some(c=>c.type==='ingredient'&&c.refId===id)).map(d=>d.name);
   return {semiNames, dishNames};
 }
@@ -1284,7 +1309,7 @@ function confirmDeleteIngredient(id){
   if(confirm(msg)) deleteIngredient(id);
 }
 function removeIngredientRefs(id){
-  state.semiRecipes.forEach(s=>{ s.components = s.components.filter(c=>c.ingredientId!==id); });
+  state.semiRecipes.forEach(s=>{ s.components = s.components.filter(c=>!(c.type==='ingredient'&&c.refId===id)); });
   state.dishes.forEach(d=>{ d.components = d.components.filter(c=>!(c.type==='ingredient'&&c.refId===id)); });
 }
 function deleteIngredient(id){
@@ -1432,17 +1457,21 @@ function renderSemiList(){
 }
 
 function findSemiUsage(id){
-  return state.dishes.filter(d=>d.components.some(c=>c.type==='semi'&&c.refId===id)).map(d=>d.name);
+  const dishNames = state.dishes.filter(d=>d.components.some(c=>c.type==='semi'&&c.refId===id)).map(d=>d.name);
+  const semiNames = state.semiRecipes.filter(s2=>s2.id!==id && s2.components.some(c=>c.type==='semi'&&c.refId===id)).map(s2=>s2.name);
+  return {dishNames, semiNames};
 }
 function confirmDeleteSemi(id){
   const s = findSemi(id);
-  const usedIn = findSemiUsage(id);
+  const usage = findSemiUsage(id);
+  const used = [...usage.semiNames.map(n=>'Công thức nền: '+n), ...usage.dishNames.map(n=>'Món: '+n)];
   let msg = `Xoá công thức nền "${s.name}"?`;
-  if(usedIn.length) msg += `\n\n⚠️ Đang được dùng trong món:\n- ${usedIn.join('\n- ')}\n\nXoá sẽ tự gỡ khỏi các món trên.`;
+  if(used.length) msg += `\n\n⚠️ Đang được dùng trong:\n- ${used.join('\n- ')}\n\nXoá sẽ tự gỡ khỏi các công thức/món trên.`;
   if(confirm(msg)) deleteSemi(id);
 }
 function removeSemiRefs(id){
   state.dishes.forEach(d=>{ d.components = d.components.filter(c=>!(c.type==='semi'&&c.refId===id)); });
+  state.semiRecipes.forEach(s2=>{ s2.components = s2.components.filter(c=>!(c.type==='semi'&&c.refId===id)); });
 }
 function deleteSemi(id){
   removeSemiRefs(id);
@@ -1456,11 +1485,12 @@ function bulkDeleteSemi(){
   if(!ids.length){ toast('⚠️ Chưa chọn công thức nào'); return; }
   const usedLines = ids.map(id=>{
     const s = findSemi(id);
-    const usedIn = findSemiUsage(id);
-    return usedIn.length ? `${s.name}: ${usedIn.join(', ')}` : null;
+    const usage = findSemiUsage(id);
+    const used = [...usage.semiNames, ...usage.dishNames];
+    return used.length ? `${s.name}: ${used.join(', ')}` : null;
   }).filter(Boolean);
   let msg = `Xoá ${ids.length} công thức nền đã chọn?`;
-  if(usedLines.length) msg += `\n\n⚠️ Đang được dùng trong món:\n- ${usedLines.join('\n- ')}\n\nXoá sẽ tự gỡ khỏi các món liên quan.`;
+  if(usedLines.length) msg += `\n\n⚠️ Đang được dùng trong:\n- ${usedLines.join('\n- ')}\n\nXoá sẽ tự gỡ khỏi các công thức/món liên quan.`;
   if(!confirm(msg)) return;
   ids.forEach(removeSemiRefs);
   state.semiRecipes = state.semiRecipes.filter(s=>!ids.includes(s.id));
@@ -1494,10 +1524,7 @@ function semiWizardIngredientOptions(){
 }
 function renderSemiWizard(){
   const w = state.wizard;
-  const totalSoFar = w.components.reduce((s,c)=>{
-    const ing = findIngredient(c.ingredientId);
-    return s + (ing? c.qty*ingredientUnitPrice(ing):0);
-  },0);
+  const totalSoFar = w.components.reduce((s,c)=>s + c.qty*componentUnitPrice(c), 0);
 
   let body = '';
   if(w.step===1){
@@ -1508,18 +1535,23 @@ function renderSemiWizard(){
       <button class="btn btn-primary" style="margin-top:22px;" onclick="semiStep1Next()">Tiếp tục</button>`;
   } else if(w.step===2){
     const list = w.components.map((c,idx)=>{
-      const ing = findIngredient(c.ingredientId);
-      const unitPrice = ing ? ingredientUnitPrice(ing) : 0;
-      return `<div class="comp-row"><div class="info"><div class="n">${ing?ing.name:'?'}</div><div class="m">${fmtNum(c.qty)} ${ing?ing.baseUnit:''} · ${unitPrice.toLocaleString('vi-VN',{maximumFractionDigits:1})}đ/${ing?ing.baseUnit:''} · ${fmtVND(c.qty*unitPrice)}</div></div><button class="remove" onclick="removeSemiComponent(${idx})">✕</button></div>`;
+      const unitPrice = componentUnitPrice(c);
+      return `<div class="comp-row"><div class="info"><div class="n">${componentName(c)}</div><div class="m">${fmtNum(c.qty)} ${componentUnit(c)} · ${unitPrice.toLocaleString('vi-VN',{maximumFractionDigits:1})}đ/${componentUnit(c)} · ${fmtVND(c.qty*unitPrice)}</div></div><button class="remove" onclick="removeSemiComponent(${idx})">✕</button></div>`;
     }).join('');
+    // loại công thức nền đang chỉnh sửa (và những công thức đã gián tiếp dùng lại
+    // nó) khỏi danh sách chọn — chặn tạo vòng lặp (A dùng B, B lại dùng A)
+    const selectableSemis = state.semiRecipes.filter(s2=> s2.id!==w.editingId && !semiReferencesTarget(s2.id, w.editingId||'__new__'));
     body = `
       <div class="card">
-        <label style="margin-top:0;">Nguyên liệu</label>
-        ${renderSearchSelect('w_ing', [{label:null, items: state.ingredients.map(i=>({value:i.id, label:`${i.name} (${i.baseUnit})`}))}], {placeholder:'Gõ tên nguyên liệu để tìm...', onSelect:'wizardTrackCompSelection', selectedValue: w.pendingSelValue||'', selectedLabel: w.pendingSelLabel||''})}
+        <label style="margin-top:0;">Thành phần (công thức nền khác hoặc nguyên liệu thô)</label>
+        ${renderSearchSelect('w_ing', [
+          {label:'Công thức nền', items: selectableSemis.map(s2=>({value:`semi:${s2.id}`, label:`⭐ ${s2.name} (${s2.yieldUnit})`}))},
+          {label:'Nguyên liệu thô', items: state.ingredients.map(i=>({value:`ingredient:${i.id}`, label:`${i.name} (${i.baseUnit})`}))}
+        ], {placeholder:'Gõ tên để tìm...', onSelect:'wizardTrackCompSelection', selectedValue: w.pendingSelValue||'', selectedLabel: w.pendingSelLabel||''})}
         <label>Định mức cho cả mẻ</label>
         <div style="display:flex;gap:10px;align-items:center;">
           <input type="number" id="w_qty" value="${w.pendingQty||''}" placeholder="200" style="flex:1;" oninput="wizardTrackQtyInput(this.value)" onkeydown="if(event.key==='Enter') addSemiComponent()">
-          <span class="unit-badge" id="w_unitBadge">${(findIngredient(w.pendingSelValue)||state.ingredients[0]||{}).baseUnit||''}</span>
+          <span class="unit-badge" id="w_unitBadge">${componentUnit(parsePendingSel(w.pendingSelValue))||''}</span>
         </div>
         <button class="btn btn-outline btn-sm" style="margin-top:14px;" onclick="addSemiComponent()">+ Thêm vào công thức</button>
         ${renderWizardQuickAddBlock()}
@@ -1573,10 +1605,10 @@ function semiStep1Next(){
   if(!name){ toast('⚠️ Nhập tên công thức nền'); return; }
   state.wizard.name = name; state.wizard.step = 2; render();
 }
-function srUpdateSemiUnitBadge(id, value){
-  const ing = findIngredient(value);
-  const badge = document.getElementById('w_unitBadge');
-  if(ing && badge) badge.textContent = ing.baseUnit;
+function parsePendingSel(val){
+  if(!val) return null;
+  if(val.includes(':')){ const [type, refId] = val.split(':'); return {type, refId}; }
+  return {type:'ingredient', refId:val}; // tương thích ngược nếu giá trị không có tiền tố loại
 }
 /* ---- theo dõi lựa chọn/định mức đang gõ dở trong wizard, để giữ lại khi mở/đóng
    ô "tạo nguyên liệu mới tại chỗ" (tránh phải render lại mất trạng thái) ---- */
@@ -1585,7 +1617,8 @@ function wizardTrackCompSelection(id, value){
   state.wizard.pendingSelValue = value;
   const inputEl = document.getElementById('sr_input_'+id);
   state.wizard.pendingSelLabel = inputEl ? inputEl.value : '';
-  if(id==='w_ing') srUpdateSemiUnitBadge(id, value);
+  const badge = document.getElementById('w_unitBadge');
+  if(badge) badge.textContent = componentUnit(parsePendingSel(value)) || '';
 }
 function wizardTrackQtyInput(val){
   if(state.wizard) state.wizard.pendingQty = val;
@@ -1638,24 +1671,20 @@ function wizardSaveQuickAddIngredient(){
   const newIng = {id: nextId('NL'), name, group, buyUnit, packQty, baseUnit, price};
   state.ingredients.push(newIng);
   state.wizard.quickAddOpen = false;
-  if(state.screen==='dishWizard'){
-    state.wizard.pendingSelValue = `ingredient:${newIng.id}`;
-    state.wizard.pendingSelLabel = `${newIng.name} (${newIng.baseUnit})`;
-  } else {
-    state.wizard.pendingSelValue = newIng.id;
-    state.wizard.pendingSelLabel = `${newIng.name} (${newIng.baseUnit})`;
-  }
+  state.wizard.pendingSelValue = `ingredient:${newIng.id}`;
+  state.wizard.pendingSelLabel = `${newIng.name} (${newIng.baseUnit})`;
   toast(`✅ Đã tạo "${name}" và chọn vào ô thành phần`);
   syncToCloud();
   render();
 }
 function addSemiComponent(){
-  const ingId = document.getElementById('sr_value_w_ing').value;
+  const raw = document.getElementById('sr_value_w_ing').value;
   const qty = parseFloat(document.getElementById('w_qty').value);
-  if(!ingId){ toast('⚠️ Chọn nguyên liệu'); return; }
+  if(!raw){ toast('⚠️ Chọn thành phần'); return; }
   if(!qty){ toast('⚠️ Nhập định mức'); return; }
+  const sel = parsePendingSel(raw);
   state.wizard.pendingSelValue=''; state.wizard.pendingSelLabel=''; state.wizard.pendingQty='';
-  state.wizard.components.push({ingredientId:ingId, qty});
+  state.wizard.components.push({type:sel.type, refId:sel.refId, qty});
   render();
 }
 function removeSemiComponent(idx){ state.wizard.components.splice(idx,1); render(); }
@@ -2436,9 +2465,8 @@ function buildScaleResult(){
   if(!target || target<=0) return `<div class="hint" style="margin-top:14px;">Nhập mẻ mong muốn để xem kết quả chia tỷ lệ.</div>`;
   const ratio = target / s.yieldQty;
   const rows = s.components.map(c=>{
-    const ing = findIngredient(c.ingredientId);
     const scaledQty = c.qty * ratio;
-    return `<div class="comp-row"><div class="info"><div class="n">${ing?ing.name:'(đã xoá)'}</div><div class="m">${fmtNum(Math.round(scaledQty*100)/100)} ${ing?ing.baseUnit:''}</div></div></div>`;
+    return `<div class="comp-row"><div class="info"><div class="n">${componentName(c)}</div><div class="m">${fmtNum(Math.round(scaledQty*100)/100)} ${componentUnit(c)}</div></div></div>`;
   }).join('');
   const scaledCost = semiTotalCost(s) * ratio;
   return `
@@ -2481,7 +2509,7 @@ function confirmSaveScaledSemi(){
   const name = document.getElementById('scaled_name').value.trim();
   if(!name){ toast('⚠️ Nhập tên công thức mới'); return; }
   const ratio = target / s.yieldQty;
-  const newComponents = s.components.map(c=>({ ingredientId: c.ingredientId, qty: Math.round(c.qty*ratio*100)/100 }));
+  const newComponents = s.components.map(c=>({ type:c.type, refId:c.refId, qty: Math.round(c.qty*ratio*100)/100 }));
   state.semiRecipes.push({ id: nextId('BTP'), name, components:newComponents, yieldQty: target, yieldUnit: s.yieldUnit });
   toast(`✅ Đã lưu "${name}"`);
   syncToCloud();
