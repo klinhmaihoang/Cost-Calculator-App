@@ -175,7 +175,7 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-28-fix-false-conflict';
+const APP_VERSION = '2026-08-29-free-yield-unit';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -380,13 +380,6 @@ async function ensureTabTitles(spreadsheetId){
       body: JSON.stringify({requests})
     });
   }
-}
-async function getFileModifiedTime(sheetId){
-  try{
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${sheetId}?fields=modifiedTime`, {headers:{Authorization:'Bearer '+accessToken}});
-    const json = await res.json();
-    return json.modifiedTime || null;
-  }catch(e){ return null; }
 }
 async function writeAllTabs(sheetId, dataByTab){
   await ensureTabTitles(sheetId); // tự đổi tên tab cũ (tiếng Anh) sang tiếng Việt nếu cần
@@ -1543,10 +1536,11 @@ function renderSemiWizard(){
       <label>Sản lượng thành phẩm thực tế thu được</label>
       <div style="display:flex;gap:10px;">
         <input type="number" id="w_yieldQty" value="${w.yieldQty}" placeholder="1700" style="flex:2;" onkeydown="if(event.key==='Enter') semiStep3Next()">
-        <select id="w_yieldUnit" style="flex:1;">
-          <option value="ml" ${w.yieldUnit==='ml'?'selected':''}>ml</option>
-          <option value="g" ${w.yieldUnit==='g'?'selected':''}>g</option>
-        </select>
+        <input type="text" id="w_yieldUnit" list="semiYieldUnitOptions" value="${w.yieldUnit||'ml'}" placeholder="ml, g, cái..." style="flex:1;">
+        <datalist id="semiYieldUnitOptions">
+          <option value="ml"><option value="g"><option value="kg"><option value="lít">
+          <option value="cái"><option value="lát"><option value="gói">
+        </datalist>
       </div>
       <div class="hint">VD: nấu 2000ml nước chỉ ra được 1700ml do bã hút nước — nhập đúng số thực tế đo được.</div>
       <div class="btn-row">
