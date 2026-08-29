@@ -175,7 +175,7 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-29-fix-blank-screen';
+const APP_VERSION = '2026-08-29-editable-qty';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -1540,7 +1540,7 @@ function renderSemiWizard(){
   } else if(w.step===2){
     const list = w.components.map((c,idx)=>{
       const unitPrice = componentUnitPrice(c);
-      return `<div class="comp-row"><div class="info"><div class="n">${componentName(c)}</div><div class="m">${fmtNum(c.qty)} ${componentUnit(c)} · ${unitPrice.toLocaleString('vi-VN',{maximumFractionDigits:1})}đ/${componentUnit(c)} · ${fmtVND(c.qty*unitPrice)}</div></div><button class="remove" onclick="removeSemiComponent(${idx})">✕</button></div>`;
+      return `<div class="comp-row"><div class="info"><div class="n">${componentName(c)}</div><div class="m" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><input type="number" value="${c.qty}" style="width:80px;padding:6px 8px;border:2px solid var(--line);border-radius:8px;font-size:14px;" oninput="wizardCompUpdateQty(${idx}, this.value)"> ${componentUnit(c)} · ${unitPrice.toLocaleString('vi-VN',{maximumFractionDigits:1})}đ/${componentUnit(c)} · <span id="wCompLine${idx}">${fmtVND(c.qty*unitPrice)}</span></div></div><button class="remove" onclick="removeSemiComponent(${idx})">✕</button></div>`;
     }).join('');
     // loại công thức nền đang chỉnh sửa (và những công thức đã gián tiếp dùng lại
     // nó) khỏi danh sách chọn — chặn tạo vòng lặp (A dùng B, B lại dùng A)
@@ -1561,7 +1561,7 @@ function renderSemiWizard(){
         ${renderWizardQuickAddBlock()}
       </div>
       ${list}
-      <div class="card-sub" style="margin:10px 0 4px;">Tổng cost mẻ hiện tại: <b>${fmtVND(totalSoFar)}</b></div>
+      <div class="card-sub" style="margin:10px 0 4px;" id="wSemiTotalCost">Tổng cost mẻ hiện tại: <b>${fmtVND(totalSoFar)}</b></div>
       <div class="btn-row">
         <button class="btn btn-outline" onclick="wizardBack()">← Quay lại</button>
         <button class="btn btn-primary" onclick="semiStep2Next()">Tiếp tục</button>
@@ -1692,6 +1692,21 @@ function addSemiComponent(){
   render();
 }
 function removeSemiComponent(idx){ state.wizard.components.splice(idx,1); render(); }
+// Sửa định lượng ngay tại dòng đã thêm, khỏi phải xoá rồi thêm lại — dùng chung
+// cho cả wizard công thức nền lẫn wizard tính giá món (cùng cấu trúc components).
+function wizardCompUpdateQty(idx, val){
+  if(!state.wizard || !state.wizard.components[idx]) return;
+  const qty = parseFloat(val) || 0;
+  state.wizard.components[idx].qty = qty;
+  const c = state.wizard.components[idx];
+  const lineEl = document.getElementById('wCompLine'+idx);
+  if(lineEl) lineEl.textContent = fmtVND(qty*componentUnitPrice(c));
+  const total = state.wizard.components.reduce((s,cc)=>s + cc.qty*componentUnitPrice(cc), 0);
+  const semiTotalEl = document.getElementById('wSemiTotalCost');
+  if(semiTotalEl) semiTotalEl.innerHTML = `Tổng cost mẻ hiện tại: <b>${fmtVND(total)}</b>`;
+  const dishTotalEl = document.getElementById('wDishTotalCost');
+  if(dishTotalEl) dishTotalEl.innerHTML = `Cost nguyên liệu hiện tại: <b>${fmtVND(total)}</b>`;
+}
 function semiStep2Next(){
   if(state.wizard.components.length===0){ toast('⚠️ Thêm ít nhất 1 nguyên liệu'); return; }
   state.wizard.step = 3; render();
@@ -1744,7 +1759,7 @@ function renderDishWizard(){
   } else if(w.step===2){
     const list = w.components.map((c,idx)=>`
       <div class="comp-row">
-        <div class="info"><div class="n">${componentName(c)}</div><div class="m">${fmtNum(c.qty)} ${componentUnit(c)} · ${fmtVND(c.qty*componentUnitPrice(c))}</div></div>
+        <div class="info"><div class="n">${componentName(c)}</div><div class="m" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><input type="number" value="${c.qty}" style="width:80px;padding:6px 8px;border:2px solid var(--line);border-radius:8px;font-size:14px;" oninput="wizardCompUpdateQty(${idx}, this.value)"> ${componentUnit(c)} · <span id="wCompLine${idx}">${fmtVND(c.qty*componentUnitPrice(c))}</span></div></div>
         <button class="remove" onclick="removeDishComponent(${idx})">✕</button>
       </div>`).join('');
     body = `
@@ -1760,7 +1775,7 @@ function renderDishWizard(){
         ${renderWizardQuickAddBlock()}
       </div>
       ${list || '<div class="hint">Chưa có thành phần nào — thêm ở trên.</div>'}
-      <div class="card-sub" style="margin:10px 0 4px;">Cost nguyên liệu hiện tại: <b>${fmtVND(cost)}</b></div>
+      <div class="card-sub" style="margin:10px 0 4px;" id="wDishTotalCost">Cost nguyên liệu hiện tại: <b>${fmtVND(cost)}</b></div>
       <div class="btn-row">
         <button class="btn btn-outline" onclick="wizardBack()">← Quay lại</button>
         <button class="btn btn-primary" onclick="dishStep2Next()">Tiếp tục</button>
