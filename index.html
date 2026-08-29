@@ -175,7 +175,7 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-29-semi-in-semi';
+const APP_VERSION = '2026-08-29-fix-blank-screen';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -750,18 +750,22 @@ function semiTotalCost(semi, visited){
 function semiUnitPrice(semi, visited){ return semi && semi.yieldQty ? semiTotalCost(semi, visited)/semi.yieldQty : 0; }
 
 function componentUnitPrice(c, visited){
+  if(!c) return 0;
   if(c.type==='ingredient'){ const ing=findIngredient(c.refId); return ing?ingredientUnitPrice(ing):0; }
   const semi=findSemi(c.refId); return semi?semiUnitPrice(semi, visited):0;
 }
 function componentUnit(c){
+  if(!c) return '';
   if(c.type==='ingredient'){ const ing=findIngredient(c.refId); return ing?ing.baseUnit:''; }
   const semi=findSemi(c.refId); return semi?semi.yieldUnit:'';
 }
 function componentGroup(c){
+  if(!c) return 'Khác';
   if(c.type==='ingredient'){ const ing=findIngredient(c.refId); return ing?ing.group:'Khác'; }
   return 'Bán thành phẩm';
 }
 function componentName(c){
+  if(!c) return '';
   if(c.type==='ingredient'){ const ing=findIngredient(c.refId); return ing?ing.name:'(đã xoá)'; }
   const semi=findSemi(c.refId); return semi?semi.name:'(đã xoá)';
 }
