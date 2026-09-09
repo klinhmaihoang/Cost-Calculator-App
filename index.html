@@ -175,7 +175,7 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-29-editable-qty';
+const APP_VERSION = '2026-08-29-sequential-id';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -671,6 +671,15 @@ function resumeGoogleSession(){
 ========================================================= */
 
 const GROUPS = ["Nguyên liệu nền", "Topping", "Đá", "Bao bì", "Khác"];
+// Danh sách nhóm gợi ý khi gõ = nhóm mặc định + mọi nhóm người dùng đã tự đặt
+// trước đó (không trùng lặp) — người dùng vẫn gõ tự do được nhóm hoàn toàn mới.
+function allGroupsSuggested(){
+  const used = state.ingredients.map(i=>i.group).filter(Boolean);
+  return Array.from(new Set([...GROUPS, ...used]));
+}
+function groupDatalist(listId){
+  return `<datalist id="${listId}">${allGroupsSuggested().map(g=>`<option value="${g.replace(/"/g,'&quot;')}">`).join('')}</datalist>`;
+}
 const GROUP_COLORS = {
   "Nguyên liệu nền": "#F0A319",
   "Bán thành phẩm": "#6A3D9A",
@@ -683,10 +692,36 @@ const GROUP_COLORS = {
 // ID ngắn gọn, có tiền tố theo loại cho dễ nhận biết (NL/BTP/MON), vẫn đủ duy nhất
 // vì kết hợp thời gian + số ngẫu nhiên — không dùng bộ đếm (bộ đếm sẽ reset mỗi lần
 // tải lại trang và có thể tạo ra ID trùng với dữ liệu đã lưu trước đó từ phiên khác).
-const nextId = (prefix) => {
-  const time = Date.now().toString(36).slice(-3).toUpperCase();
-  const rand = Math.random().toString(36).slice(2, 5).toUpperCase();
-  return (prefix ? prefix + '-' : '') + time + rand;
+// Mã sinh ra có dạng: TIỀN_TỐ-TÊN_VIẾT_TẮT-2_KÝ_TỰ_NGẪU_NHIÊN (VD: NL-CAPHE-8X)
+// — nhìn mã là biết ngay loại gì (NL=nguyên liệu, BTP=công thức nền, MON=món,
+// DR=công thức thử nghiệm) VÀ gần đúng là của cái gì, không còn là chuỗi vô nghĩa.
+function slugifyForId(name){
+  const clean = stripDiacritics(String(name||'')).toUpperCase().replace(/[^A-Z0-9\s]/g,'').trim();
+  const words = clean.split(/\s+/).filter(Boolean).slice(0,2);
+  const base = words.map(w=>w.slice(0,5)).join('');
+  return base.slice(0,10);
+}
+const nextId = (prefix, name) => {
+  const slug = name ? slugifyForId(name) : '';
+  const base = (prefix ? prefix + '-' : '') + (slug ? slug + '-' : '');
+  // Số thứ tự tính dựa trên DỮ LIỆU THẬT đang có (không dùng bộ đếm bộ nhớ tạm,
+  // vì bộ đếm sẽ reset về 0 mỗi lần tải lại trang và có thể tạo mã trùng với dữ
+  // liệu đã lưu trước đó từ phiên khác) — quét mọi mã cùng tiền tố+tên viết tắt
+  // này, lấy số lớn nhất rồi +1.
+  const allIds = [
+    ...state.ingredients.map(i=>i.id),
+    ...state.semiRecipes.map(s=>s.id),
+    ...state.dishes.map(d=>d.id),
+    ...state.draftRecipes.map(r=>r.id),
+  ];
+  const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp('^' + escaped + '(\\d+)$');
+  let maxN = 0;
+  allIds.forEach(id=>{
+    const m = String(id||'').match(re);
+    if(m){ const n = parseInt(m[1], 10); if(n > maxN) maxN = n; }
+  });
+  return base + (maxN + 1);
 };
 
 const state = {
@@ -1180,7 +1215,7 @@ function renderIngredients(){
       ${sel ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteAllIngredients()">🗑️ Xoá tất cả</button>`}
     </div>
     <div id="ingredientsRowsContainer">${buildIngredientRows()}</div>
-    <button class="btn-ghost" style="margin-top:14px;font-size:13px;" onclick="confirmShortenAllIds()">🔧 Rút gọn toàn bộ mã cũ (nguyên liệu, công thức nền, món)</button>
+    <button class="btn-ghost" style="margin-top:14px;font-size:13px;" onclick="confirmShortenAllIds()">🔧 Đặt lại mã dễ đọc cho toàn bộ dữ liệu (nguyên liệu, công thức nền, món)</button>
   </div>
   ${selectBar('ingredients', state.ingredients.map(i=>i.id))}`;
 }
@@ -1264,7 +1299,7 @@ function removeBulkImportRow(idx){ state.bulkImportRows.splice(idx,1); render();
 function confirmBulkImport(){
   const rows = state.bulkImportRows||[];
   if(!rows.length){ toast('⚠️ Không có gì để thêm'); return; }
-  rows.forEach(r=>{ state.ingredients.push({id: nextId('NL'), ...r}); });
+  rows.forEach(r=>{ state.ingredients.push({id: nextId('NL', r.name), ...r}); });
   toast(`✅ Đã thêm ${rows.length} nguyên liệu`);
   state.bulkImportRows = [];
   state.bulkImportFailed = [];
@@ -1273,22 +1308,22 @@ function confirmBulkImport(){
 }
 
 function confirmShortenAllIds(){
-  const msg = 'Rút gọn toàn bộ mã hiện có (nguyên liệu, công thức nền, món) sang dạng ngắn (VD: NL-9FQ2A1)?\n\nKhông mất dữ liệu — chỉ đổi cách đặt mã, mọi liên kết (công thức nền dùng nguyên liệu nào, món dùng thành phần nào) sẽ tự cập nhật theo. Nên làm 1 lần rồi thôi.';
+  const msg = 'Đặt lại mã cho toàn bộ dữ liệu hiện có (nguyên liệu, công thức nền, món) theo quy ước dễ đọc (VD: NL-CAPHE-8X)?\n\nKhông mất dữ liệu — chỉ đổi cách đặt mã, mọi liên kết (công thức nền dùng nguyên liệu nào, món dùng thành phần nào) sẽ tự cập nhật theo. Nên làm 1 lần rồi thôi.';
   if(confirm(msg)) shortenAllIds();
 }
 function shortenAllIds(){
   const idMap = {};
-  state.ingredients.forEach(i=>{ idMap[i.id] = nextId('NL'); });
-  state.semiRecipes.forEach(s=>{ idMap[s.id] = nextId('BTP'); });
-  state.dishes.forEach(d=>{ idMap[d.id] = nextId('MON'); });
+  // Gán ID mới NGAY trong lúc quét (không tách thành 2 vòng lặp riêng) — để nếu
+  // có nhiều mục trùng tên viết tắt (VD 2 loại "Cà phê" khác nhau), số thứ tự
+  // tính đúng tăng dần (1, 2, 3...) thay vì tất cả bị trùng số 1.
+  state.ingredients.forEach(i=>{ const nid = nextId('NL', i.name); idMap[i.id] = nid; i.id = nid; });
+  state.semiRecipes.forEach(s=>{ const nid = nextId('BTP', s.name); idMap[s.id] = nid; s.id = nid; });
+  state.dishes.forEach(d=>{ const nid = nextId('MON', d.name); idMap[d.id] = nid; d.id = nid; });
 
-  state.ingredients.forEach(i=>{ i.id = idMap[i.id]; });
   state.semiRecipes.forEach(s=>{
-    s.id = idMap[s.id];
     s.components.forEach(c=>{ if(idMap[c.refId]) c.refId = idMap[c.refId]; });
   });
   state.dishes.forEach(d=>{
-    d.id = idMap[d.id];
     d.components.forEach(c=>{ if(idMap[c.refId]) c.refId = idMap[c.refId]; });
   });
 
@@ -1356,7 +1391,6 @@ function deleteAllIngredients(){
 
 function renderIngredientForm(){
   const editing = state.editIngredientId ? findIngredient(state.editIngredientId) : null;
-  const opts = GROUPS.map(g=>`<option value="${g}" ${editing&&editing.group===g?'selected':''}>${g}</option>`).join('');
   return `
   <div class="screen">
     <button class="btn-ghost" onclick="go('ingredients')">← Quay lại</button>
@@ -1364,7 +1398,8 @@ function renderIngredientForm(){
     <label>Tên nguyên liệu</label>
     <input type="text" id="f_name" value="${editing?editing.name:''}" placeholder="VD: Trà ô long">
     <label>Nhóm</label>
-    <select id="f_group">${opts}</select>
+    <input type="text" id="f_group" list="groupOptionsForm" value="${editing?editing.group:'Nguyên liệu nền'}" placeholder="VD: Nguyên liệu nền, Bao bì, Siro tự pha...">
+    ${groupDatalist('groupOptionsForm')}
     <label>Quy cách mua (VD: Túi 500g)</label>
     <input type="text" id="f_buyUnit" value="${editing?editing.buyUnit:''}" placeholder="Túi 500g">
     <div class="settings-grid" style="margin-top:16px;">
@@ -1404,7 +1439,7 @@ function saveIngredient(){
     Object.assign(findIngredient(state.editIngredientId), payload);
     toast('✅ Đã lưu thay đổi');
   } else {
-    state.ingredients.push({id: nextId('NL'), ...payload});
+    state.ingredients.push({id: nextId('NL', name), ...payload});
     toast('✅ Đã lưu nguyên liệu');
   }
   state.editIngredientId = null;
@@ -1636,7 +1671,8 @@ function renderWizardQuickAddBlock(){
       <label style="margin-top:0;">Tên nguyên liệu mới</label>
       <input type="text" id="wq_name" placeholder="VD: Sữa dừa">
       <label>Nhóm</label>
-      <select id="wq_group">${GROUPS.map(g=>`<option value="${g}">${g}</option>`).join('')}</select>
+      <input type="text" id="wq_group" list="groupOptionsWizard" value="Nguyên liệu nền" placeholder="VD: Nguyên liệu nền, Bao bì...">
+      ${groupDatalist('groupOptionsWizard')}
       <label>Quy cách mua (VD: Túi 500g)</label>
       <input type="text" id="wq_buyUnit" placeholder="Túi 500g">
       <div class="settings-grid" style="margin-top:12px;">
@@ -1672,7 +1708,7 @@ function wizardSaveQuickAddIngredient(){
   const priceRaw = document.getElementById('wq_price').value;
   const price = parseFloat(priceRaw);
   if(!name || !packQty || !baseUnit || priceRaw===''|| isNaN(price)){ toast('⚠️ Vui lòng nhập đủ thông tin nguyên liệu'); return; }
-  const newIng = {id: nextId('NL'), name, group, buyUnit, packQty, baseUnit, price};
+  const newIng = {id: nextId('NL', name), name, group, buyUnit, packQty, baseUnit, price};
   state.ingredients.push(newIng);
   state.wizard.quickAddOpen = false;
   state.wizard.pendingSelValue = `ingredient:${newIng.id}`;
@@ -1723,7 +1759,7 @@ function saveSemi(){
     Object.assign(findSemi(w.editingId), {name:w.name, components:w.components, yieldQty:w.yieldQty, yieldUnit:w.yieldUnit});
     toast('✅ Đã lưu thay đổi công thức nền');
   } else {
-    state.semiRecipes.push({id: nextId('BTP'), name:w.name, components:w.components, yieldQty:w.yieldQty, yieldUnit:w.yieldUnit});
+    state.semiRecipes.push({id: nextId('BTP', w.name), name:w.name, components:w.components, yieldQty:w.yieldQty, yieldUnit:w.yieldUnit});
     toast('✅ Đã lưu công thức nền');
   }
   syncToCloud();
@@ -1866,7 +1902,7 @@ function saveDish(){
     Object.assign(d, {name:w.name, components:w.components, opPct:w.opPct, fcPct:w.fcPct});
     toast('✅ Đã lưu thay đổi món');
   } else {
-    state.dishes.push({id: nextId('MON'), name:w.name, components:w.components, opPct:w.opPct, fcPct:w.fcPct});
+    state.dishes.push({id: nextId('MON', w.name), name:w.name, components:w.components, opPct:w.opPct, fcPct:w.fcPct});
     toast('✅ Đã lưu món');
   }
   syncToCloud();
@@ -2176,7 +2212,7 @@ function removeBulkDraftRow(idx){ state.bulkDraftRows.splice(idx,1); render(); }
 function confirmBulkDraftImport(){
   const rows = state.bulkDraftRows||[];
   if(!rows.length){ toast('⚠️ Không có gì để thêm'); return; }
-  rows.forEach(r=>{ state.draftRecipes.push({id: nextId('DR'), name:r.name, ingredientsText:r.ingredientsText, stepsText:'', createdAt: new Date().toISOString()}); });
+  rows.forEach(r=>{ state.draftRecipes.push({id: nextId('DR', r.name), name:r.name, ingredientsText:r.ingredientsText, stepsText:'', createdAt: new Date().toISOString()}); });
   toast(`✅ Đã thêm ${rows.length} công thức thử nghiệm — vào từng món bấm "Chuyển thành món để tính cost"`);
   state.bulkDraftRows = [];
   syncToCloud();
@@ -2191,7 +2227,7 @@ function saveDraftRecipe(){
     Object.assign(state.draftRecipes.find(x=>x.id===state.editDraftId), {name, ingredientsText, stepsText});
     toast('✅ Đã lưu thay đổi');
   } else {
-    state.draftRecipes.push({id: nextId('DR'), name, ingredientsText, stepsText, createdAt: new Date().toISOString()});
+    state.draftRecipes.push({id: nextId('DR', name), name, ingredientsText, stepsText, createdAt: new Date().toISOString()});
     toast('✅ Đã lưu công thức thử nghiệm');
   }
   state.editDraftId = null;
@@ -2345,7 +2381,8 @@ function renderDraftMatchReview(){
         <label style="margin-top:0;">Tên nguyên liệu mới</label>
         <input type="text" id="mr_qa_name_${idx}" value="${row.name}">
         <label>Nhóm</label>
-        <select id="mr_qa_group_${idx}">${GROUPS.map(g=>`<option value="${g}">${g}</option>`).join('')}</select>
+        <input type="text" id="mr_qa_group_${idx}" list="groupOptionsMr${idx}" value="Nguyên liệu nền" placeholder="VD: Nguyên liệu nền, Bao bì...">
+        ${groupDatalist('groupOptionsMr'+idx)}
         <label>Quy cách mua (VD: Túi 500g)</label>
         <input type="text" id="mr_qa_buyUnit_${idx}" placeholder="Túi 500g">
         <div class="settings-grid" style="margin-top:12px;">
@@ -2425,7 +2462,7 @@ function mrSaveQuickAddIngredient(idx){
   const priceRaw = document.getElementById(`mr_qa_price_${idx}`).value;
   const price = parseFloat(priceRaw);
   if(!name || !packQty || !baseUnit || priceRaw===''|| isNaN(price)){ toast('⚠️ Vui lòng nhập đủ thông tin nguyên liệu'); return; }
-  const newIng = {id: nextId('NL'), name, group, buyUnit, packQty, baseUnit, price};
+  const newIng = {id: nextId('NL', name), name, group, buyUnit, packQty, baseUnit, price};
   state.ingredients.push(newIng);
   const row = state.matchReview.rows[idx];
   row.selType = 'ingredient';
@@ -2529,7 +2566,7 @@ function confirmSaveScaledSemi(){
   if(!name){ toast('⚠️ Nhập tên công thức mới'); return; }
   const ratio = target / s.yieldQty;
   const newComponents = s.components.map(c=>({ type:c.type, refId:c.refId, qty: Math.round(c.qty*ratio*100)/100 }));
-  state.semiRecipes.push({ id: nextId('BTP'), name, components:newComponents, yieldQty: target, yieldUnit: s.yieldUnit });
+  state.semiRecipes.push({ id: nextId('BTP', name), name, components:newComponents, yieldQty: target, yieldUnit: s.yieldUnit });
   toast(`✅ Đã lưu "${name}"`);
   syncToCloud();
   state.scaleCalc = null;
@@ -2570,9 +2607,12 @@ function renderDishScaleCalc(){
     <div id="dishScaleResultContainer">${buildDishScaleResult()}</div>
   </div>`;
 }
+function isPackagingGroup(group){
+  return String(group||'').trim().toLowerCase() === 'bao bì';
+}
 function initDishScaleRows(d, ratio){
   return d.components.map(c=>{
-    const isPackaging = c.type==='ingredient' && (findIngredient(c.refId)||{}).group==='Bao bì';
+    const isPackaging = c.type==='ingredient' && isPackagingGroup((findIngredient(c.refId)||{}).group);
     return { type:c.type, refId:c.refId, qty: isPackaging ? c.qty : Math.round(c.qty*ratio*100)/100, isPackaging };
   });
 }
@@ -2605,7 +2645,7 @@ function buildDishScaleResult(){
   const sc = state.dishScaleCalc;
   const d = sc ? state.dishes.find(x=>x.id===sc.dishId) : null;
   if(!d || !sc.rows) return `<div class="hint" style="margin-top:14px;">Nhập đủ 2 size để xem kết quả.</div>`;
-  const bagIngredients = state.ingredients.filter(i=>i.group==='Bao bì');
+  const bagIngredients = state.ingredients.filter(i=>isPackagingGroup(i.group));
   const rowsHtml = sc.rows.map((r,idx)=>{
     const unit = componentUnit(r);
     const name = componentName(r);
@@ -2675,7 +2715,7 @@ function confirmSaveScaledDish(){
   const name = document.getElementById('scaled_dish_name').value.trim();
   if(!name){ toast('⚠️ Nhập tên món mới'); return; }
   const newComponents = sc.rows.map(r=>({ type:r.type, refId:r.refId, qty:r.qty }));
-  state.dishes.push({ id: nextId('MON'), name, components:newComponents, opPct:d.opPct, fcPct:d.fcPct });
+  state.dishes.push({ id: nextId('MON', name), name, components:newComponents, opPct:d.opPct, fcPct:d.fcPct });
   toast(`✅ Đã lưu "${name}"`);
   syncToCloud();
   state.dishScaleCalc = null;
