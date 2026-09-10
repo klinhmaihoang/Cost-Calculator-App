@@ -175,7 +175,7 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-29-sequential-id';
+const APP_VERSION = '2026-08-29-fix-pct-rounding';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -288,7 +288,7 @@ function tabsToState(tabs){
   state.semiRecipes = (tabs.SemiRecipes||[]).map(r=>({id:String(r.id), name:r.name, yieldQty:Number(r.yieldQty), yieldUnit:r.yieldUnit, components: semiComps[r.id]||[]}));
   const dishComps = {};
   (tabs.DishComponents||[]).forEach(r=>{ (dishComps[r.dishId] = dishComps[r.dishId]||[]).push({type:r.type, refId:String(r.refId), qty:Number(r.qty)}); });
-  state.dishes = (tabs.Dishes||[]).map(r=>({id:String(r.id), name:r.name, opPct:Number(r.opPct), fcPct:Number(r.fcPct), components: dishComps[r.id]||[]}));
+  state.dishes = (tabs.Dishes||[]).map(r=>({id:String(r.id), name:r.name, opPct:Math.round(Number(r.opPct)*100)/100, fcPct:Math.round(Number(r.fcPct)*100)/100, components: dishComps[r.id]||[]}));
   state.draftRecipes = (tabs.DraftRecipes||[]).map(r=>({id:String(r.id), name:r.name, ingredientsText:r.ingredientsText||'', stepsText:r.stepsText||'', createdAt:r.createdAt||''}));
 }
 
@@ -1823,11 +1823,11 @@ function renderDishWizard(){
       <div class="card"><div class="card-sub">Cost nguyên liệu</div><div class="card-title">${fmtVND(cost)}</div></div>
       <label>% Chi phí vận hành</label>
       <select id="w_opPct" class="g-select" onchange="dishSettingsPreview()">
-        ${[0.10,0.15,0.20,0.25].map(v=>`<option value="${v}" ${v===w.opPct?'selected':''}>${Math.round(v*100)}%</option>`).join('')}
+        ${[0.10,0.15,0.20,0.25].map(v=>`<option value="${v}" ${Math.abs(v-w.opPct)<0.001?'selected':''}>${Math.round(v*100)}%</option>`).join('')}
       </select>
       <label>% Food cost mục tiêu</label>
       <select id="w_fcPct" class="g-select" onchange="dishSettingsPreview()">
-        ${[0.25,0.28,0.30,0.32,0.35].map(v=>`<option value="${v}" ${v===w.fcPct?'selected':''}>${Math.round(v*100)}%</option>`).join('')}
+        ${[0.25,0.28,0.30,0.32,0.35].map(v=>`<option value="${v}" ${Math.abs(v-w.fcPct)<0.001?'selected':''}>${Math.round(v*100)}%</option>`).join('')}
       </select>
       <div class="price-hero" id="pricePreview">
         <div class="lbl">Giá bán đề xuất</div>
