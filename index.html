@@ -175,7 +175,7 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-29-fix-pct-rounding';
+const APP_VERSION = '2026-08-29-add-0pct-option';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -1823,7 +1823,7 @@ function renderDishWizard(){
       <div class="card"><div class="card-sub">Cost nguyên liệu</div><div class="card-title">${fmtVND(cost)}</div></div>
       <label>% Chi phí vận hành</label>
       <select id="w_opPct" class="g-select" onchange="dishSettingsPreview()">
-        ${[0.10,0.15,0.20,0.25].map(v=>`<option value="${v}" ${Math.abs(v-w.opPct)<0.001?'selected':''}>${Math.round(v*100)}%</option>`).join('')}
+        ${[0,0.10,0.15,0.20,0.25].map(v=>`<option value="${v}" ${Math.abs(v-w.opPct)<0.001?'selected':''}>${Math.round(v*100)}%</option>`).join('')}
       </select>
       <label>% Food cost mục tiêu</label>
       <select id="w_fcPct" class="g-select" onchange="dishSettingsPreview()">
