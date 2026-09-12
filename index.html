@@ -175,7 +175,7 @@ const DEMO_MODE = GOOGLE_DEMO && MHKL_DEMO; // chỉ true khi CẢ HAI chưa n�
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-29-add-0pct-option';
+const APP_VERSION = '2026-08-29-fix-silent-401';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -238,6 +238,28 @@ HEADER_TO_KEY.SemiComponents['Mã nguyên liệu'] = 'refId';
 HEADER_TO_KEY.SemiComponents['Tên nguyên liệu'] = 'componentName';
 
 let accessToken = null;   // token OAuth của học viên đăng nhập Google
+
+// QUAN TRỌNG: bọc mọi lệnh gọi tới Google API qua hàm này thay vì fetch() trực
+// tiếp — fetch() KHÔNG tự báo lỗi khi server trả về mã lỗi (401, 403, 500...),
+// nó vẫn coi là "thành công" ở tầng JS nếu không mất mạng. Nếu không kiểm tra
+// res.ok, một request bị từ chối (VD token hết hạn) sẽ bị bỏ qua trong im lặng,
+// khiến app tưởng đã lưu thành công trong khi Sheet không hề được cập nhật gì.
+async function googleFetch(url, options){
+  const res = await fetch(url, options);
+  if(!res.ok){
+    if(res.status === 401){
+      const err = new Error('EXPIRED_TOKEN');
+      err.status = 401;
+      throw err;
+    }
+    let detail = '';
+    try{ const j = await res.clone().json(); detail = (j.error && j.error.message) || ''; }catch(e){}
+    const err = new Error(`Lỗi kết nối Google (mã ${res.status})${detail?': '+detail:''}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res;
+}
 let tokenClient = null;
 
 function showFullLoading(text, showCancel){
@@ -345,7 +367,7 @@ function loginWithGoogle(){
 }
 async function findAppSpreadsheet(){
   const q = encodeURIComponent("appProperties has { key='app' and value='tdh_cost_app' } and trashed=false");
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`, {headers:{Authorization:'Bearer '+accessToken}});
+  const res = await googleFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`, {headers:{Authorization:'Bearer '+accessToken}});
   const json = await res.json();
   // QUAN TRỌNG: nếu lệnh tìm kiếm thất bại (lỗi mạng, hết hạn quyền...), TUYỆT ĐỐI
   // không được coi là "chưa có Sheet nào" rồi âm thầm tạo Sheet mới — sẽ tạo trùng
@@ -357,20 +379,20 @@ async function findAppSpreadsheet(){
 }
 async function createAppSpreadsheet(){
   const body = { properties:{title:'CostApp - Dữ liệu của tôi'}, sheets: Object.keys(TABS).map(key=>({properties:{title:TAB_TITLES[key]}})) };
-  const res = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+  const res = await googleFetch('https://sheets.googleapis.com/v4/spreadsheets', {
     method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'}, body:JSON.stringify(body)
   });
   const json = await res.json();
   const sheetId = json.spreadsheetId;
   await writeAllTabs(sheetId, stateToTabs()); // ghi sẵn data mẫu làm điểm khởi đầu
-  await fetch(`https://www.googleapis.com/drive/v3/files/${sheetId}?fields=id`, {
+  await googleFetch(`https://www.googleapis.com/drive/v3/files/${sheetId}?fields=id`, {
     method:'PATCH', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
     body: JSON.stringify({appProperties:{app:'tdh_cost_app'}})
   });
   return sheetId;
 }
 async function ensureTabTitles(spreadsheetId){
-  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`, {headers:{Authorization:'Bearer '+accessToken}});
+  const res = await googleFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`, {headers:{Authorization:'Bearer '+accessToken}});
   const json = await res.json();
   const byTitle = {};
   (json.sheets||[]).forEach(s=>{ byTitle[s.properties.title] = s.properties.sheetId; });
@@ -383,7 +405,7 @@ async function ensureTabTitles(spreadsheetId){
     else requests.push({addSheet:{properties:{title:niceName}}}); // tab hoàn toàn mới (tính năng vừa thêm), Sheet cũ chưa từng có
   });
   if(requests.length){
-    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+    await googleFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
       method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
       body: JSON.stringify({requests})
     });
@@ -398,7 +420,7 @@ async function writeAllTabs(sheetId, dataByTab){
     const rows = (dataByTab[tab]||[]).map(obj=>keys.map(k=> obj[k]===undefined?'':obj[k]));
     return {range: `${TAB_TITLES[tab]}!A1`, values:[headers, ...rows]};
   });
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`, {
+  await googleFetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`, {
     method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
     body: JSON.stringify({valueInputOption:'RAW', data})
   });
@@ -410,7 +432,7 @@ async function writeAllTabs(sheetId, dataByTab){
     const startRow = rowCount + 2; // +1 cho dòng tiêu đề, +1 để bắt đầu từ dòng kế tiếp
     return `${TAB_TITLES[tab]}!A${startRow}:Z10000`;
   });
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchClear`, {
+  await googleFetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchClear`, {
     method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
     body: JSON.stringify({ranges: clearRanges})
   });
@@ -422,7 +444,7 @@ async function readAllTabs(sheetId){
   // valueRenderOption=UNFORMATTED_VALUE bắt buộc phải có — nếu không, các cột đã
   // định dạng tiền tệ/phần trăm (VD 280.000 đ) sẽ bị trả về dạng CHUỖI hiển thị
   // thay vì số gốc, làm Number(...) ra NaN sau khi đọc lại từ Sheet.
-  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchGet?${rangeParams}&valueRenderOption=UNFORMATTED_VALUE`, {headers:{Authorization:'Bearer '+accessToken}});
+  const res = await googleFetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchGet?${rangeParams}&valueRenderOption=UNFORMATTED_VALUE`, {headers:{Authorization:'Bearer '+accessToken}});
   const json = await res.json();
   const out = {};
   Object.keys(TABS).forEach((tab,i)=>{
@@ -441,7 +463,7 @@ async function readAllTabs(sheetId){
 
 /* ---- style Sheet: header tô màu, đóng băng dòng 1, định dạng tiền/% ---- */
 async function getSheetIdMap(spreadsheetId){
-  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`, {headers:{Authorization:'Bearer '+accessToken}});
+  const res = await googleFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`, {headers:{Authorization:'Bearer '+accessToken}});
   const json = await res.json();
   const map = {};
   (json.sheets||[]).forEach(s=>{ map[s.properties.title] = s.properties.sheetId; });
@@ -481,7 +503,7 @@ async function applySheetStyling(spreadsheetId){
   const sheetIdMap = await getSheetIdMap(spreadsheetId);
   const requests = buildStyleRequests(sheetIdMap);
   if(!requests.length) return;
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+  await googleFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
     method:'POST', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
     body: JSON.stringify({requests})
   });
@@ -492,7 +514,7 @@ async function afterGoogleLogin(){
     // Lấy email để đối chiếu với danh sách MHKL đã duyệt (mục Admin > Đăng nhập Google)
     let email = '';
     try{
-      const profRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {headers:{Authorization:'Bearer '+accessToken}});
+      const profRes = await googleFetch('https://www.googleapis.com/oauth2/v3/userinfo', {headers:{Authorization:'Bearer '+accessToken}});
       const prof = await profRes.json();
       email = prof.email || '';
     }catch(e){}
@@ -598,8 +620,12 @@ async function syncToCloud(){
       }
       toast('☁️ Đã đồng bộ vào Google Sheet của bạn');
     }catch(err){
-      toast('⚠️ Đồng bộ thất bại — dữ liệu vẫn được giữ trên máy, thử lại sau');
       console.error(err);
+      if(err && err.message === 'EXPIRED_TOKEN'){
+        alert('⚠️ Phiên đăng nhập Google đã hết hạn — KHÔNG lưu được lên Sheet.\n\nDữ liệu bạn vừa nhập vẫn còn TRÊN MÁY (chưa mất), nhưng chưa được lưu lên Google Sheet.\n\nLàm theo đúng thứ tự sau:\n1. Vào mục "Sao lưu & Khôi phục" → tải 1 bản sao lưu về máy NGAY (phòng hờ).\n2. Tải lại trang (F5) và đăng nhập lại.\n3. Kiểm tra lại dữ liệu vừa nhập — nếu thiếu, khôi phục từ file sao lưu vừa tải.');
+      } else {
+        toast('⚠️ Đồng bộ thất bại — dữ liệu vẫn được giữ trên máy, thử lại sau');
+      }
     }
   })();
 
@@ -2776,14 +2802,14 @@ async function openBackupScreen(){
 async function listAutoBackups(){
   try{
     const q = encodeURIComponent("appProperties has { key='app' and value='tdh_cost_app_backup' } and trashed=false");
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,createdTime)&orderBy=createdTime desc`, {headers:{Authorization:'Bearer '+accessToken}});
+    const res = await googleFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,createdTime)&orderBy=createdTime desc`, {headers:{Authorization:'Bearer '+accessToken}});
     const json = await res.json();
     return json.files||[];
   }catch(e){ return []; }
 }
 async function restoreFromAutoBackup(fileId){
   try{
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {headers:{Authorization:'Bearer '+accessToken}});
+    const res = await googleFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {headers:{Authorization:'Bearer '+accessToken}});
     const backup = await res.json();
     if(!Array.isArray(backup.ingredients) && !Array.isArray(backup.dishes)){ toast('⚠️ File sao lưu không đúng định dạng'); return; }
     const msg = `Khôi phục từ bản sao lưu lúc ${backup.exportedAt?new Date(backup.exportedAt).toLocaleString('vi-VN'):'không rõ'}?\n\n- ${(backup.ingredients||[]).length} nguyên liệu\n- ${(backup.semiRecipes||[]).length} công thức nền\n- ${(backup.dishes||[]).length} món\n- ${(backup.draftRecipes||[]).length} công thức thử nghiệm\n\n⚠️ Sẽ THAY THẾ toàn bộ dữ liệu hiện tại. Tiếp tục?`;
@@ -2803,7 +2829,7 @@ async function autoBackupIfNeeded(){
   try{
     const today = new Date().toISOString().slice(0,10);
     const q = encodeURIComponent(`appProperties has { key='app' and value='tdh_cost_app_backup' } and appProperties has { key='date' and value='${today}' } and trashed=false`);
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`, {headers:{Authorization:'Bearer '+accessToken}});
+    const res = await googleFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`, {headers:{Authorization:'Bearer '+accessToken}});
     const json = await res.json();
     if(json.files && json.files.length) return; // đã có bản sao lưu hôm nay rồi, khỏi tạo thêm
 
@@ -2818,7 +2844,7 @@ async function autoBackupIfNeeded(){
       `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`+
       `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(backup)}\r\n`+
       `--${boundary}--`;
-    await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+    await googleFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
       method:'POST', headers:{ Authorization:'Bearer '+accessToken, 'Content-Type': `multipart/related; boundary=${boundary}` }, body
     });
     cleanupOldAutoBackups(); // không cần đợi, chạy nền
@@ -2827,12 +2853,12 @@ async function autoBackupIfNeeded(){
 async function cleanupOldAutoBackups(){
   try{
     const q = encodeURIComponent("appProperties has { key='app' and value='tdh_cost_app_backup' } and trashed=false");
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,createdTime)&orderBy=createdTime desc`, {headers:{Authorization:'Bearer '+accessToken}});
+    const res = await googleFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,createdTime)&orderBy=createdTime desc`, {headers:{Authorization:'Bearer '+accessToken}});
     const json = await res.json();
     const keep = 30; // giữ lại tối đa 30 bản gần nhất
     const toDelete = (json.files||[]).slice(keep);
     for(const f of toDelete){
-      await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, { method:'PATCH', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'}, body: JSON.stringify({trashed:true}) });
+      await googleFetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, { method:'PATCH', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'}, body: JSON.stringify({trashed:true}) });
     }
   }catch(e){ console.error('cleanup backups error', e); }
 }
