@@ -178,7 +178,7 @@ const SSO_PARAM = new URLSearchParams(window.location.search).get('sso');
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-29-fix-silent-401';
+const APP_VERSION = '2026-08-29-fix-session-timeout';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -688,18 +688,36 @@ async function tryRestoreSession(){
   if(cached.method==='mhkl'){
     if(MHKL_DEMO){ render(); return; }
     showFullLoading('Đang khôi phục phiên đăng nhập...', true);
+    // QUAN TRỌNG: Apps Script có thể "cold start" rất chậm (đôi khi 10-15+
+    // giây) — cho thời gian chờ dài hơn hẳn, và THỬ LẠI 1 lần trước khi coi là
+    // thất bại. Tuyệt đối KHÔNG xoá phiên đăng nhập chỉ vì bị timeout/mất
+    // mạng — token vẫn có thể còn hạn, chỉ là chưa kịp hỏi máy chủ. Chỉ xoá
+    // phiên khi máy chủ TRẢ LỜI RÕ RÀNG là token không hợp lệ.
+    let loadRes = null, gotServerResponse = false;
     try{
-      const loadRes = await withTimeout(callAppsScript({action:'load', token: cached.token}), 8000);
-      if(loadRes.ok){
-        state.user = {name:cached.name, method:'mhkl', token:cached.token};
-        tabsToState(loadRes.data);
-        hideFullLoading();
-        go('home');
-        return;
-      }
-    }catch(e){}
+      loadRes = await withTimeout(callAppsScript({action:'load', token: cached.token}), 15000);
+      gotServerResponse = true;
+    }catch(e1){
+      try{
+        loadRes = await withTimeout(callAppsScript({action:'load', token: cached.token}), 20000);
+        gotServerResponse = true;
+      }catch(e2){ /* vẫn không có phản hồi sau 2 lần thử — coi là lỗi mạng/máy chủ chậm, không phải token sai */ }
+    }
+    if(gotServerResponse && loadRes.ok){
+      state.user = {name:cached.name, method:'mhkl', token:cached.token};
+      tabsToState(loadRes.data);
+      hideFullLoading();
+      go('home');
+      return;
+    }
     hideFullLoading();
-    clearSessionCache();
+    if(gotServerResponse){
+      // Máy chủ đã trả lời rõ ràng (không phải timeout) nhưng báo không hợp lệ
+      // — token thật sự hết hạn/sai, lúc này mới xoá phiên.
+      clearSessionCache();
+    } else {
+      toast('⚠️ Kết nối tới máy chủ đang chậm, chưa xác nhận được phiên đăng nhập — tải lại trang (F5) để thử lại. Phiên đăng nhập của bạn vẫn còn nếu chưa hết hạn.');
+    }
     render();
     return;
   }
