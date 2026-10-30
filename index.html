@@ -178,7 +178,7 @@ const SSO_PARAM = new URLSearchParams(window.location.search).get('sso');
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-08-29-fix-session-timeout';
+const APP_VERSION = '2026-10-30-smart-backup';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -1379,6 +1379,7 @@ function removeBulkImportRow(idx){ state.bulkImportRows.splice(idx,1); render();
 function confirmBulkImport(){
   const rows = state.bulkImportRows||[];
   if(!rows.length){ toast('⚠️ Không có gì để thêm'); return; }
+  createBackupIfChanged('import');
   rows.forEach(r=>{ state.ingredients.push({id: nextId('NL', r.name), ...r}); });
   toast(`✅ Đã thêm ${rows.length} nguyên liệu`);
   state.bulkImportRows = [];
@@ -1450,6 +1451,7 @@ function bulkDeleteIngredients(){
   let msg = `Xoá ${ids.length} nguyên liệu đã chọn?`;
   if(usedLines.length) msg += `\n\n⚠️ Đang được dùng trong:\n- ${usedLines.join('\n- ')}\n\nXoá sẽ tự gỡ khỏi các công thức/món liên quan.`;
   if(!confirm(msg)) return;
+  createBackupIfChanged('delete');
   ids.forEach(removeIngredientRefs);
   state.ingredients = state.ingredients.filter(i=>!ids.includes(i.id));
   exitSelectMode('ingredients');
@@ -1460,6 +1462,7 @@ function bulkDeleteIngredients(){
 function deleteAllIngredients(){
   if(!state.ingredients.length){ toast('Chưa có nguyên liệu nào'); return; }
   if(!confirm(`Xoá TOÀN BỘ ${state.ingredients.length} nguyên liệu?\n\nSẽ tự gỡ khỏi mọi công thức nền và món đang dùng. Không thể hoàn tác.`)) return;
+  createBackupIfChanged('delete');
   state.semiRecipes.forEach(s=>{ s.components = []; });
   state.dishes.forEach(d=>{ d.components = d.components.filter(c=>c.type!=='ingredient'); });
   state.ingredients = [];
@@ -1611,6 +1614,7 @@ function bulkDeleteSemi(){
   let msg = `Xoá ${ids.length} công thức nền đã chọn?`;
   if(usedLines.length) msg += `\n\n⚠️ Đang được dùng trong:\n- ${usedLines.join('\n- ')}\n\nXoá sẽ tự gỡ khỏi các công thức/món liên quan.`;
   if(!confirm(msg)) return;
+  createBackupIfChanged('delete');
   ids.forEach(removeSemiRefs);
   state.semiRecipes = state.semiRecipes.filter(s=>!ids.includes(s.id));
   exitSelectMode('semi');
@@ -1621,6 +1625,7 @@ function bulkDeleteSemi(){
 function deleteAllSemi(){
   if(!state.semiRecipes.length){ toast('Chưa có công thức nền nào'); return; }
   if(!confirm(`Xoá TOÀN BỘ ${state.semiRecipes.length} công thức nền?\n\nSẽ tự gỡ khỏi mọi món đang dùng. Không thể hoàn tác.`)) return;
+  createBackupIfChanged('delete');
   state.dishes.forEach(d=>{ d.components = d.components.filter(c=>c.type!=='semi'); });
   state.semiRecipes = [];
   exitSelectMode('semi');
@@ -2110,6 +2115,7 @@ function bulkDeleteDishes(){
   const ids = Array.from(state.selected.dishes);
   if(!ids.length){ toast('⚠️ Chưa chọn món nào'); return; }
   if(!confirm(`Xoá ${ids.length} món đã chọn?`)) return;
+  createBackupIfChanged('delete');
   state.dishes = state.dishes.filter(d=>!ids.includes(d.id));
   exitSelectMode('dishes');
   toast(`🗑️ Đã xoá ${ids.length} món`);
@@ -2119,6 +2125,7 @@ function bulkDeleteDishes(){
 function deleteAllDishes(){
   if(!state.dishes.length){ toast('Chưa có món nào'); return; }
   if(!confirm(`Xoá TOÀN BỘ ${state.dishes.length} món trong menu? Không thể hoàn tác.`)) return;
+  createBackupIfChanged('delete');
   state.dishes = [];
   exitSelectMode('dishes');
   toast('🗑️ Đã xoá toàn bộ menu');
@@ -2292,6 +2299,7 @@ function removeBulkDraftRow(idx){ state.bulkDraftRows.splice(idx,1); render(); }
 function confirmBulkDraftImport(){
   const rows = state.bulkDraftRows||[];
   if(!rows.length){ toast('⚠️ Không có gì để thêm'); return; }
+  createBackupIfChanged('import');
   rows.forEach(r=>{ state.draftRecipes.push({id: nextId('DR', r.name), name:r.name, ingredientsText:r.ingredientsText, stepsText:'', createdAt: new Date().toISOString()}); });
   toast(`✅ Đã thêm ${rows.length} công thức thử nghiệm — vào từng món bấm "Chuyển thành món để tính cost"`);
   state.bulkDraftRows = [];
@@ -2328,6 +2336,7 @@ function bulkDeleteDrafts(){
   const ids = Array.from(state.selected.drafts);
   if(!ids.length){ toast('⚠️ Chưa chọn công thức nào'); return; }
   if(!confirm(`Xoá ${ids.length} công thức thử nghiệm đã chọn?`)) return;
+  createBackupIfChanged('delete');
   state.draftRecipes = state.draftRecipes.filter(r=>!ids.includes(r.id));
   exitSelectMode('drafts');
   toast(`🗑️ Đã xoá ${ids.length} công thức`);
@@ -2337,6 +2346,7 @@ function bulkDeleteDrafts(){
 function deleteAllDrafts(){
   if(!state.draftRecipes.length){ toast('Chưa có công thức thử nghiệm nào'); return; }
   if(!confirm(`Xoá TOÀN BỘ ${state.draftRecipes.length} công thức thử nghiệm? Không thể hoàn tác.`)) return;
+  createBackupIfChanged('delete');
   state.draftRecipes = [];
   exitSelectMode('drafts');
   toast('🗑️ Đã xoá toàn bộ công thức thử nghiệm');
@@ -2815,7 +2825,7 @@ function renderBackupScreen(){
       <div class="card-row">
         <div>
           <div class="card-title">${new Date(f.createdTime).toLocaleDateString('vi-VN')}</div>
-          <div class="card-sub">${new Date(f.createdTime).toLocaleTimeString('vi-VN')}</div>
+          <div class="card-sub">${new Date(f.createdTime).toLocaleTimeString('vi-VN')} · ${BACKUP_KIND_LABELS[(f.appProperties||{}).kind||'auto']||'Tự động'}</div>
         </div>
         <button class="btn btn-outline btn-sm" onclick="restoreFromAutoBackup('${f.id}')">Khôi phục</button>
       </div>
@@ -2831,6 +2841,15 @@ function renderBackupScreen(){
       <button class="btn btn-primary" onclick="exportBackup()">Tải xuống file sao lưu (.json)</button>
     </div>
     <div class="card">
+      <div class="card-title">📊 Tải dữ liệu ra Excel / CSV</div>
+      <div class="card-sub" style="margin:6px 0 14px;">Để xem, in hoặc chỉnh sửa dữ liệu bằng Excel. Lưu ý: file này dùng để xem/lưu trữ — muốn khôi phục lại vào app thì dùng file sao lưu (.json) ở trên.</div>
+      <button class="btn btn-primary" id="btnExportXlsx" onclick="exportExcel()">Tải file Excel (.xlsx)</button>
+      <div class="card-sub" style="margin:14px 0 8px;">Hoặc tải từng bảng dạng CSV:</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        ${Object.keys(TABS).map(k=>`<button class="btn btn-outline btn-sm" onclick="exportCsv('${k}')">${TAB_TITLES[k]}</button>`).join('')}
+      </div>
+    </div>
+    <div class="card">
       <div class="card-title">📂 Khôi phục từ file sao lưu</div>
       <div class="card-sub" style="margin:6px 0 14px;">Chọn đúng file .json đã tải về trước đó — sẽ THAY THẾ toàn bộ dữ liệu hiện tại trong app bằng dữ liệu trong file.</div>
       <input type="file" id="restoreFileInput" accept="application/json,.json" style="display:none;" onchange="handleRestoreFile(event)">
@@ -2839,7 +2858,7 @@ function renderBackupScreen(){
     ${isGoogle ? `
     <div class="card">
       <div class="card-title">🤖 Sao lưu tự động</div>
-      <div class="card-sub" style="margin:6px 0 14px;">App tự tạo 1 bản sao lưu trong Drive của bạn mỗi khi bạn mở app (tối đa 1 bản/ngày), giữ lại 30 ngày gần nhất — không cần bấm gì cả.</div>
+      <div class="card-sub" style="margin:6px 0 14px;">App tự tạo bản sao lưu trong Drive của bạn khi mở app mà dữ liệu có thay đổi so với bản trước (không đổi thì không tạo thêm), và tự tạo thêm 1 bản ngay trước khi khôi phục, dán nhanh hoặc xoá hàng loạt. App giữ 7 bản gần nhất, thêm mỗi tuần 1 bản (khoảng 1 tháng) và mỗi tháng 1 bản (khoảng 3 tháng) — không cần bấm gì cả.</div>
       ${autoRows}
     </div>` : `<div class="hint">Sao lưu tự động hiện chỉ áp dụng cho luồng đăng nhập Google.</div>`}
     <div class="hint" style="margin-top:10px;">Gợi ý: nên tải sao lưu định kỳ (VD trước mỗi lần cập nhật app), lưu file vào nơi dễ tìm lại (Google Drive riêng, gửi email cho chính mình...).</div>
@@ -2856,7 +2875,7 @@ async function openBackupScreen(){
 async function listAutoBackups(){
   try{
     const q = encodeURIComponent("appProperties has { key='app' and value='tdh_cost_app_backup' } and trashed=false");
-    const res = await googleFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,createdTime)&orderBy=createdTime desc`, {headers:{Authorization:'Bearer '+accessToken}});
+    const res = await googleFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,createdTime,appProperties)&orderBy=createdTime desc&pageSize=200`, {headers:{Authorization:'Bearer '+accessToken}});
     const json = await res.json();
     return json.files||[];
   }catch(e){ return []; }
@@ -2868,6 +2887,7 @@ async function restoreFromAutoBackup(fileId){
     if(!Array.isArray(backup.ingredients) && !Array.isArray(backup.dishes)){ toast('⚠️ File sao lưu không đúng định dạng'); return; }
     const msg = `Khôi phục từ bản sao lưu lúc ${backup.exportedAt?new Date(backup.exportedAt).toLocaleString('vi-VN'):'không rõ'}?\n\n- ${(backup.ingredients||[]).length} nguyên liệu\n- ${(backup.semiRecipes||[]).length} công thức nền\n- ${(backup.dishes||[]).length} món\n- ${(backup.draftRecipes||[]).length} công thức thử nghiệm\n\n⚠️ Sẽ THAY THẾ toàn bộ dữ liệu hiện tại. Tiếp tục?`;
     if(confirm(msg)){
+      createBackupIfChanged('restore'); // giữ lại dữ liệu hiện tại phòng khi khôi phục nhầm bản
       state.ingredients = backup.ingredients||[];
       state.semiRecipes = backup.semiRecipes||[];
       state.dishes = backup.dishes||[];
@@ -2878,40 +2898,92 @@ async function restoreFromAutoBackup(fileId){
     }
   }catch(e){ toast('⚠️ Không tải được file sao lưu'); console.error(e); }
 }
-async function autoBackupIfNeeded(){
-  if(!state.user || state.user.method!=='google') return; // chỉ áp dụng luồng Google (Drive riêng)
+/* ---- Sao lưu thông minh (luồng Google) ----
+   - Chỉ tạo bản mới khi dữ liệu THỰC SỰ khác bản sao lưu gần nhất (so bằng "dấu vân tay" hash lưu ngay trên file).
+   - Tự tạo thêm 1 bản NGAY TRƯỚC các thao tác rủi ro: khôi phục, dán nhanh, xoá hàng loạt.
+   - Giữ: 7 bản gần nhất + mỗi tuần 1 bản (4 tuần) + mỗi tháng 1 bản (3 tháng);
+     bản "trước thao tác rủi ro" được giữ chắc 14 ngày. */
+const BACKUP_KIND_LABELS = {
+  auto: 'Tự động (có thay đổi)',
+  update: 'Khi mở bản app mới',
+  restore: 'Trước khi khôi phục',
+  import: 'Trước khi dán nhanh',
+  delete: 'Trước khi xoá',
+};
+const VERSION_KEY = 'tdh_costapp_last_version';
+function stableStringify(v){
+  if(Array.isArray(v)) return '['+v.map(stableStringify).join(',')+']';
+  if(v && typeof v==='object') return '{'+Object.keys(v).sort().filter(k=>v[k]!==undefined).map(k=>JSON.stringify(k)+':'+stableStringify(v[k])).join(',')+'}';
+  return JSON.stringify(v);
+}
+function dataHash(data){
+  const str = stableStringify(data);
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for(let i=0;i<str.length;i++){
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1>>>16), 2246822507) ^ Math.imul(h2 ^ (h2>>>13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2>>>16), 2246822507) ^ Math.imul(h1 ^ (h1>>>13), 3266489909);
+  return (4294967296*(2097151 & h2) + (h1>>>0)).toString(36) + '-' + str.length.toString(36);
+}
+let backupChain = Promise.resolve();
+// Chụp dữ liệu NGAY LÚC GỌI (đồng bộ) nên có thể gọi ngay trước khi xoá/ghi đè mà không cần đợi.
+function createBackupIfChanged(kind){
+  if(!state.user || state.user.method!=='google') return Promise.resolve();
+  const data = { ingredients: state.ingredients, semiRecipes: state.semiRecipes, dishes: state.dishes, draftRecipes: state.draftRecipes };
+  if(!data.ingredients.length && !data.semiRecipes.length && !data.dishes.length && !data.draftRecipes.length) return Promise.resolve(); // không sao lưu dữ liệu trống
+  const hash = dataHash(data);
+  const snapshot = JSON.stringify({ exportedAt: new Date().toISOString(), appVersion: APP_VERSION, autoBackup: true, backupKind: kind, ...data });
+  backupChain = backupChain.then(()=>doBackup(kind, hash, snapshot)).catch(e=>console.error('backup error', e)); // im lặng, không làm phiền người dùng nếu lỗi
+  return backupChain;
+}
+async function doBackup(kind, hash, snapshot){
+  const q = encodeURIComponent("appProperties has { key='app' and value='tdh_cost_app_backup' } and trashed=false");
+  const res = await googleFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=createdTime desc&pageSize=1&fields=files(id,appProperties)`, {headers:{Authorization:'Bearer '+accessToken}});
+  const json = await res.json();
+  const latest = (json.files||[])[0];
+  if(latest && latest.appProperties && latest.appProperties.hash === hash) return; // dữ liệu không đổi so với bản gần nhất -> khỏi tạo thêm
+  const today = new Date().toISOString().slice(0,10);
+  const stamp = new Date().toISOString().slice(0,16).replace('T',' ');
+  const metadata = { name: `CostApp - Sao lưu - ${stamp} - ${kind}.json`, mimeType:'application/json', appProperties:{ app:'tdh_cost_app_backup', date: today, hash, kind } };
+  const boundary = '-------costapp' + Date.now();
+  const body =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`+
+    `--${boundary}\r\nContent-Type: application/json\r\n\r\n${snapshot}\r\n`+
+    `--${boundary}--`;
+  await googleFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+    method:'POST', headers:{ Authorization:'Bearer '+accessToken, 'Content-Type': `multipart/related; boundary=${boundary}` }, body
+  });
+  cleanupOldAutoBackups(); // chạy nền
+}
+function autoBackupIfNeeded(){
+  let kind = 'auto';
   try{
-    const today = new Date().toISOString().slice(0,10);
-    const q = encodeURIComponent(`appProperties has { key='app' and value='tdh_cost_app_backup' } and appProperties has { key='date' and value='${today}' } and trashed=false`);
-    const res = await googleFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`, {headers:{Authorization:'Bearer '+accessToken}});
-    const json = await res.json();
-    if(json.files && json.files.length) return; // đã có bản sao lưu hôm nay rồi, khỏi tạo thêm
-
-    const backup = {
-      exportedAt: new Date().toISOString(), appVersion: APP_VERSION, autoBackup: true,
-      ingredients: state.ingredients, semiRecipes: state.semiRecipes,
-      dishes: state.dishes, draftRecipes: state.draftRecipes,
-    };
-    const metadata = { name: `CostApp - Sao lưu tự động - ${today}.json`, mimeType:'application/json', appProperties:{ app:'tdh_cost_app_backup', date: today } };
-    const boundary = '-------costapp' + Date.now();
-    const body =
-      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`+
-      `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(backup)}\r\n`+
-      `--${boundary}--`;
-    await googleFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-      method:'POST', headers:{ Authorization:'Bearer '+accessToken, 'Content-Type': `multipart/related; boundary=${boundary}` }, body
-    });
-    cleanupOldAutoBackups(); // không cần đợi, chạy nền
-  }catch(e){ console.error('auto backup error', e); } // im lặng, tuyệt đối không làm phiền người dùng nếu lỗi
+    const last = localStorage.getItem(VERSION_KEY);
+    if(last && last !== APP_VERSION) kind = 'update';
+    localStorage.setItem(VERSION_KEY, APP_VERSION);
+  }catch(e){}
+  return createBackupIfChanged(kind);
 }
 async function cleanupOldAutoBackups(){
   try{
     const q = encodeURIComponent("appProperties has { key='app' and value='tdh_cost_app_backup' } and trashed=false");
-    const res = await googleFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,createdTime)&orderBy=createdTime desc`, {headers:{Authorization:'Bearer '+accessToken}});
-    const json = await res.json();
-    const keep = 30; // giữ lại tối đa 30 bản gần nhất
-    const toDelete = (json.files||[]).slice(keep);
-    for(const f of toDelete){
+    const res = await googleFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,createdTime,appProperties)&orderBy=createdTime desc&pageSize=200`, {headers:{Authorization:'Bearer '+accessToken}});
+    const files = (await res.json()).files||[];
+    if(files.length <= 7) return;
+    const DAY = 86400000, now = Date.now();
+    const keep = new Set(files.slice(0,7).map(f=>f.id)); // 7 bản gần nhất
+    const wk = {}, mo = {};
+    files.forEach(f=>{ // danh sách đã sắp mới -> cũ, nên bản đầu tiên của mỗi khoảng là bản mới nhất của khoảng đó
+      const age = (now - new Date(f.createdTime).getTime())/DAY;
+      const kind = (f.appProperties||{}).kind || 'auto';
+      if(kind!=='auto' && age<14) keep.add(f.id);                                   // bản "trước thao tác rủi ro": giữ chắc 14 ngày
+      if(age<35){ const b=Math.floor(age/7);  if(!(b in wk)){ wk[b]=1; keep.add(f.id); } } // mỗi tuần 1 bản, 5 tuần gần nhất
+      if(age<120){ const b=Math.floor(age/30); if(!(b in mo)){ mo[b]=1; keep.add(f.id); } } // mỗi tháng 1 bản, 4 tháng gần nhất
+    });
+    for(const f of files){
+      if(keep.has(f.id)) continue;
       await googleFetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, { method:'PATCH', headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'}, body: JSON.stringify({trashed:true}) });
     }
   }catch(e){ console.error('cleanup backups error', e); }
@@ -2936,6 +3008,76 @@ function exportBackup(){
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   toast('💾 Đã tải file sao lưu về máy');
+}
+/* ---- Xuất Excel / CSV (chỉ để xem/lưu trữ, không dùng để khôi phục) ---- */
+function exportTableRows(tab, forCsv){
+  const keys = TABS[tab];
+  const pct = PERCENT_COLS[tab]||[];
+  const rows = stateToTabs()[tab]||[];
+  return rows.map(r=>keys.map((k,i)=>{
+    let v = r[k];
+    if(v===undefined || v===null) return '';
+    if(forCsv && pct.includes(i+1) && v!=='' && !isNaN(Number(v))) return Math.round(Number(v)*10000)/100 + '%';
+    return v;
+  }));
+}
+function downloadBlob(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+function exportStamp(){ return new Date().toISOString().slice(0,10); }
+function csvCell(v){
+  const t = String(v);
+  return /[",\r\n]/.test(t) ? '"'+t.replace(/"/g,'""')+'"' : t;
+}
+function exportCsv(tab){
+  const lines = [VI_HEADERS[tab]].concat(exportTableRows(tab, true)).map(r=>r.map(csvCell).join(','));
+  // BOM UTF-8 để Excel hiển thị đúng tiếng Việt có dấu
+  const blob = new Blob(['\uFEFF'+lines.join('\r\n')], {type:'text/csv;charset=utf-8'});
+  downloadBlob(blob, `costapp-${TAB_TITLES[tab].replace(/\s+/g,'-')}-${exportStamp()}.csv`);
+  toast('📄 Đã tải file CSV về máy');
+}
+function loadSheetJS(){
+  if(window.XLSX) return Promise.resolve();
+  return new Promise((resolve,reject)=>{
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    sc.onload = resolve; sc.onerror = ()=>reject(new Error('load xlsx failed'));
+    document.head.appendChild(sc);
+  });
+}
+async function exportExcel(){
+  const btn = document.getElementById('btnExportXlsx');
+  if(btn){ btn.disabled = true; btn.textContent = 'Đang tạo file...'; }
+  try{
+    await loadSheetJS();
+    const wb = XLSX.utils.book_new();
+    Object.keys(TABS).forEach(tab=>{
+      const aoa = [VI_HEADERS[tab]].concat(exportTableRows(tab, false));
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const cur = CURRENCY_COLS[tab]||[], pct = PERCENT_COLS[tab]||[];
+      for(let r=1; r<aoa.length; r++){
+        cur.forEach(c=>{ const cell = ws[XLSX.utils.encode_cell({r, c:c-1})]; if(cell && typeof cell.v==='number') cell.z = '#,##0'; });
+        pct.forEach(c=>{ const cell = ws[XLSX.utils.encode_cell({r, c:c-1})]; if(cell && typeof cell.v==='number') cell.z = '0.0%'; });
+      }
+      ws['!cols'] = VI_HEADERS[tab].map((h,i)=>{
+        let w = String(h).length;
+        aoa.slice(1,60).forEach(row=>{ w = Math.max(w, String(row[i]==null?'':row[i]).length); });
+        return {wch: Math.min(Math.max(w+2,8),45)};
+      });
+      XLSX.utils.book_append_sheet(wb, ws, TAB_TITLES[tab].slice(0,31));
+    });
+    XLSX.writeFile(wb, `costapp-du-lieu-${exportStamp()}.xlsx`);
+    toast('📊 Đã tải file Excel về máy');
+  }catch(e){
+    console.error(e);
+    alert('Không tải được file Excel (có thể do mạng). Bạn thử lại, hoặc tải từng bảng dạng CSV bên dưới nhé.');
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = 'Tải file Excel (.xlsx)'; }
+  }
 }
 function handleRestoreFile(event){
   const file = event.target.files[0];
@@ -2962,6 +3104,7 @@ Hiện tại đang có:
 
 ⚠️ Khôi phục sẽ THAY THẾ HOÀN TOÀN dữ liệu hiện tại bằng dữ liệu trong file sao lưu này và tự đồng bộ lên Sheet. Không thể hoàn tác. Tiếp tục?`;
     if(confirm(msg)){
+      createBackupIfChanged('restore'); // giữ lại dữ liệu hiện tại phòng khi khôi phục nhầm file
       state.ingredients = backup.ingredients||[];
       state.semiRecipes = backup.semiRecipes||[];
       state.dishes = backup.dishes||[];
