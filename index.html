@@ -178,7 +178,7 @@ const SSO_PARAM = new URLSearchParams(window.location.search).get('sso');
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-11-06-fix-admin-edit';
+const APP_VERSION = '2026-11-06-fix-admin-edit-2';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -3191,8 +3191,9 @@ function switchAdminTab(tab){ state.adminTab = tab; state.adminEditingUsername =
 
 /* ---- tab: mã học viên ---- */
 function renderAdminStudentsTab(){
-  const accs = state.adminAccounts || [];
-  const editing = state.adminEditingUsername ? accs.find(a=>a.username===state.adminEditingUsername) : null;
+  // Google Sheet có thể trả mã học viên dạng SỐ (VD 2026015) trong khi nút bấm truyền vào dạng CHUỖI -> so sánh === bị lệch, form sửa hiện trống. Luôn ép về chuỗi.
+  const accs = (state.adminAccounts || []).map(a=>({...a, username: String(a.username)}));
+  const editing = state.adminEditingUsername ? accs.find(a=>a.username===String(state.adminEditingUsername)) : null;
   const rows = accs.map(a=>{
     const revealed = state.adminRevealed.has(a.username);
     return `
@@ -3219,11 +3220,11 @@ function renderAdminStudentsTab(){
     <div class="card" ${editing?'style="border:2px solid var(--primary, #c0392b);"':''}>
       ${editing?`<div class="card-title" style="margin-bottom:8px;">✏️ Đang sửa tài khoản: ${editing.username}</div>`:''}
       <label style="margin-top:0;">Mã học viên</label>
-      <input type="text" id="a_username" placeholder="VD: HV2026-015" value="${editing?editing.username:''}" ${editing?'readonly tabindex="-1" style="background:var(--cream-deep);color:#888;"':''}>
+      <input type="text" id="a_username" placeholder="VD: HV2026-015" value="${editing?String(editing.username).replace(/"/g,'&quot;'):''}" ${editing?'readonly tabindex="-1" style="background:var(--cream-deep);color:#888;"':''}>
       <label>${editing?'Mật khẩu mới (bỏ trống nếu giữ nguyên)':'Mật khẩu tạm'}</label>
       <input type="text" id="a_password" placeholder="${editing?'••••••••':'VD: trada2026'}" value="${editing?'':''}">
       <label>Tên học viên</label>
-      <input type="text" id="a_name" placeholder="Nguyễn Thị A" value="${editing?(editing.displayName||''):''}">
+      <input type="text" id="a_name" placeholder="Nguyễn Thị A" value="${editing?String(editing.displayName||'').replace(/"/g,'&quot;'):''}">
       <div class="btn-row" style="margin-top:16px;">
         ${editing?`<button class="btn btn-outline" onclick="cancelEditAccount()">Huỷ</button>`:''}
         <button class="btn btn-primary" onclick="adminSaveAccount()">${editing?'Lưu thay đổi':'+ Tạo tài khoản'}</button>
