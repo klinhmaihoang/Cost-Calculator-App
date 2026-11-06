@@ -178,7 +178,7 @@ const SSO_PARAM = new URLSearchParams(window.location.search).get('sso');
 
 // Đổi chuỗi này mỗi lần có bản cập nhật mới — dùng để kiểm tra chắc chắn trình
 // duyệt/GitHub Pages đã tải đúng bản mới nhất, không bị cache giữ bản cũ.
-const APP_VERSION = '2026-10-30-smart-backup';
+const APP_VERSION = '2026-11-06-fix-admin-edit';
 console.log('CostApp phiên bản:', APP_VERSION);
 
 /* =========================================================
@@ -3196,7 +3196,7 @@ function renderAdminStudentsTab(){
   const rows = accs.map(a=>{
     const revealed = state.adminRevealed.has(a.username);
     return `
-    <div class="card">
+    <div class="card" ${state.adminEditingUsername===a.username?'style="opacity:.6;"':''}>
       <div class="card-row">
         <div style="flex:1;">
           <div class="card-title">${a.username}</div>
@@ -3216,9 +3216,10 @@ function renderAdminStudentsTab(){
 
   return `
     <p class="page-sub">${editing ? 'Sửa thông tin tài khoản — để trống mật khẩu nếu không muốn đổi.' : 'Điền thông tin rồi bấm tạo — hệ thống tự tạo 1 Google Sheet dữ liệu riêng cho học viên đó.'}</p>
-    <div class="card">
+    <div class="card" ${editing?'style="border:2px solid var(--primary, #c0392b);"':''}>
+      ${editing?`<div class="card-title" style="margin-bottom:8px;">✏️ Đang sửa tài khoản: ${editing.username}</div>`:''}
       <label style="margin-top:0;">Mã học viên</label>
-      <input type="text" id="a_username" placeholder="VD: HV2026-015" value="${editing?editing.username:''}" ${editing?'disabled style="background:var(--cream-deep);"':''}>
+      <input type="text" id="a_username" placeholder="VD: HV2026-015" value="${editing?editing.username:''}" ${editing?'readonly tabindex="-1" style="background:var(--cream-deep);color:#888;"':''}>
       <label>${editing?'Mật khẩu mới (bỏ trống nếu giữ nguyên)':'Mật khẩu tạm'}</label>
       <input type="text" id="a_password" placeholder="${editing?'••••••••':'VD: trada2026'}" value="${editing?'':''}">
       <label>Tên học viên</label>
@@ -3236,7 +3237,12 @@ function toggleRevealPassword(username){
   else state.adminRevealed.add(username);
   render();
 }
-function startEditAccount(username){ state.adminEditingUsername = username; render(); }
+function startEditAccount(username){
+  state.adminEditingUsername = username;
+  render();
+  window.scrollTo({top:0, behavior:'smooth'}); // form sửa nằm ở đầu trang, phải cuộn lên để thấy
+  setTimeout(()=>{ const el = document.getElementById('a_name'); if(el){ el.focus(); el.select(); } }, 250);
+}
 function cancelEditAccount(){ state.adminEditingUsername = null; render(); }
 async function adminSaveAccount(){
   const editing = state.adminEditingUsername;
